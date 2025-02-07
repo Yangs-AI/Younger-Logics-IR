@@ -6,7 +6,7 @@
 # Author: Luzhou Peng (彭路洲) & Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2025-01-09 09:47:28
+# Last Modified time: 2025-02-07 11:03:37
 # Copyright (c) 2025 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -192,7 +192,7 @@ def main(
 
     with multiprocessing.Pool(worker_number) as pool:
         with tqdm.tqdm(total=len(params), desc='Converting Models') as progress_bar:
-            for index, (status, model_id) in enumerate(pool.imap_unordered(convert_pipeline, params), start=1):
+            for index, (status, model_id) in enumerate(pool.imap(convert_pipeline, params), start=1):
                 set_convert_status_last_handled_model_id(sts_cache_dirpath, start_index, end_index, status, model_id)
                 progress_bar.set_description(f'Converting - {model_id}')
                 progress_bar.update(1)

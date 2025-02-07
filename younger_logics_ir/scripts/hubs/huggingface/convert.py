@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2025-01-13 17:34:57
+# Last Modified time: 2025-02-06 10:41:32
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -112,25 +112,30 @@ def safe_keras_export(keras_model_path: pathlib.Path, onnx_model_path: pathlib.P
 
 
 def convert_keras(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path, device: Literal['cpu', 'cuda'] = 'cpu') -> tuple[dict[str, dict[int, Literal['success', 'convert_error', 'system_kill', 'logicx_error']]], list[Instance]]:
-    status: dict[str, dict[int, Literal['success', 'convert_error', 'logicx_error']]] = dict()
+    status: dict[str, Literal['access_deny'] | dict[int, Literal['success', 'convert_error', 'logicx_error']]] = dict()
     instances: list[Instance] = list()
     remote_keras_model_paths = list()
     for remote_keras_model_path in get_huggingface_hub_model_siblings(model_id, suffixes=['.keras', '.hdf5', '.h5', '.pbtxt', '.pb']):
         if remote_keras_model_path.endswith('.pbtxt') or remote_keras_model_path.endswith('.pb'):
-            remote_keras_model_paths.append(os.path.dirname(remote_keras_model_path))
+            remote_keras_model_paths.append((os.path.dirname(remote_keras_model_path), 'D'))
         else:
-            remote_keras_model_paths.append(remote_keras_model_path)
+            remote_keras_model_paths.append((remote_keras_model_path, 'F'))
     remote_keras_model_paths = list(set(remote_keras_model_paths))
 
-    for remote_keras_model_path in remote_keras_model_paths:
+    for remote_keras_model_path, path_type in remote_keras_model_paths:
         remote_keras_model_name = os.path.splitext(remote_keras_model_path)[0]
-        if os.path.isdir(remote_keras_model_path):
-            keras_model_path = pathlib.Path(snapshot_download(model_id, allow_patterns=f'{remote_keras_model_path}/*', cache_dir=ofc_cache_dirpath)).joinpath(remote_keras_model_path)
-        else:
-            keras_model_path = pathlib.Path(hf_hub_download(model_id, remote_keras_model_path, cache_dir=ofc_cache_dirpath))
+        try:
+            if path_type == 'D':
+                allowed_pattern = '*' if remote_keras_model_path == '' else f'{remote_keras_model_path}/*'
+                keras_model_path = pathlib.Path(snapshot_download(model_id, allow_patterns=allowed_pattern, cache_dir=ofc_cache_dirpath)).joinpath(remote_keras_model_path)
+            if path_type == 'F':
+                keras_model_path = pathlib.Path(hf_hub_download(model_id, remote_keras_model_path, cache_dir=ofc_cache_dirpath))
+        except Exception as exception:
+            status[remote_keras_model_name] = 'access_deny'
+            continue
 
         status[remote_keras_model_name] = dict()
-        onnx_model_path = cvt_cache_dirpath.joinpath(f'{hash_string(keras_model_path)}.onnx')
+        onnx_model_path = cvt_cache_dirpath.joinpath(f'{hash_string(str(keras_model_path))}.onnx')
         for onnx_opset_version in get_onnx_opset_versions():
             # tf2onnx only support 14 - 18 opset version
             if onnx_opset_version < 14 or 18 < onnx_opset_version:
@@ -170,21 +175,25 @@ def safe_tflite_export(tflite_model_path: pathlib.Path, onnx_model_path: pathlib
 
 
 def convert_tflite(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path, device: Literal['cpu', 'cuda'] = 'cpu') -> tuple[dict[str, dict[int, Literal['success', 'convert_error', 'system_kill', 'logicx_error']]], list[Instance]]:
-    status: dict[str, dict[int, Literal['success', 'convert_error', 'system_kill', 'logicx_error']]] = dict()
+    status: dict[str, Literal['access_deny'] | dict[int, Literal['success', 'convert_error', 'system_kill', 'logicx_error']]] = dict()
     instances: list[Instance] = list()
     remote_tflite_model_paths = get_huggingface_hub_model_siblings(model_id, suffixes=['.tflite'])
     for remote_tflite_model_path in remote_tflite_model_paths:
         remote_tflite_model_name = os.path.splitext(remote_tflite_model_path)[0]
-        tflite_model_path = pathlib.Path(hf_hub_download(model_id, remote_tflite_model_path, cache_dir=ofc_cache_dirpath))
+        try:
+            tflite_model_path = pathlib.Path(hf_hub_download(model_id, remote_tflite_model_path, cache_dir=ofc_cache_dirpath))
+        except Exception as exception:
+            status[remote_tflite_model_name] = 'access_deny'
+            continue
 
         status[remote_tflite_model_name] = dict()
-        onnx_model_path = cvt_cache_dirpath.joinpath(f'{hash_string(tflite_model_path)}.onnx')
+        onnx_model_path = cvt_cache_dirpath.joinpath(f'{hash_string(str(tflite_model_path))}.onnx')
         for onnx_opset_version in get_onnx_opset_versions():
             # tf2onnx only support 14 - 18 opset version
             if onnx_opset_version < 14 or 18 < onnx_opset_version:
                 continue
             results_queue = multiprocessing.Queue()
-            subprocess = multiprocessing.Process(target=safe_tflite_export, args=(cvt_cache_dirpath, tflite_model_path, results_queue))
+            subprocess = multiprocessing.Process(target=safe_tflite_export, args=(tflite_model_path, onnx_model_path, onnx_opset_version, results_queue))
             subprocess.start()
             subprocess.join()
             if results_queue.empty():
@@ -416,7 +425,11 @@ def main(
                         download=model_info['downloadsAllTime'],
                     )
                 )
-                instance.save(instances_dirpath.joinpath(instance.unique))
+                instance_unique = instance.unique
+                try:
+                    instance.save(instances_dirpath.joinpath(instance_unique))
+                except FileExistsError as exception:
+                    logger.warning(f'-> Skip! Instance Already Exists: {instance_unique}')
 
             try:
                 readme = get_huggingface_hub_model_readme(model_id, token=token)

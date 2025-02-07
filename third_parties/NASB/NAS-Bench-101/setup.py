@@ -7,7 +7,7 @@ def get_dist(pkgname):
     except DistributionNotFound:
         return None
 
-install_deps = ['numpy', 'tensorflow']
+install_deps = ['numpy', 'tensorflow==2.15.0']
 if get_dist('tensorflow') is None and get_dist('tensorflow-gpu') is not None:
     install_deps.remove('tensorflow')
 

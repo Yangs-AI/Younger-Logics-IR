@@ -29,4 +29,4 @@ Run command as below:
 TF_CPP_MIN_LOG_LEVEL=3 python convert.py --model-infos-filepath /path/to/NAS-Bench-101_Model_Infos.json --save-dirpath /path/to/save --cache-dirpath /path/to/cache --start-index 0 --end-index 10 --opset 15
 ```
 
-*NOTE*: The conversion time can be reduced from approximately 1 day to 1 hour if logging messages are suppressed by setting `TF_CPP_MIN_LOG_LEVEL=3`
+*NOTE*: The conversion time can be reduced if logging messages are suppressed by setting `TF_CPP_MIN_LOG_LEVEL=3`

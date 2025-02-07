@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2025-01-01 00:10:15
+# Last Modified time: 2025-02-06 09:12:21
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -86,7 +86,9 @@ class Instance(object):
         return self.unique is None
 
     def load(self, instance_dirpath: pathlib.Path) -> None:
-        assert instance_dirpath.is_dir(), f'There is no \"Instance\" can be loaded from the specified directory \"{instance_dirpath.absolute()}\".'
+        if not instance_dirpath.is_dir():
+            raise FileNotFoundError(f'There is no \"Instance\" can be loaded from the specified directory \"{instance_dirpath.absolute()}\".')
+
         meta_filepath = instance_dirpath.joinpath(self.__class__._meta_filename)
         self._load_meta(meta_filepath)
         logicx_filepath = instance_dirpath.joinpath(self.__class__._logicx_filename)
@@ -96,7 +98,9 @@ class Instance(object):
         return
 
     def save(self, instance_dirpath: pathlib.Path) -> None:
-        assert not instance_dirpath.is_dir(), f'\"Instance\" can not be saved into the specified directory \"{instance_dirpath.absolute()}\".'
+        if instance_dirpath.is_dir():
+            raise FileExistsError(f'\"Instance\" can not be saved into the specified directory \"{instance_dirpath.absolute()}\".')
+
         meta_filepath = instance_dirpath.joinpath(self.__class__._meta_filename)
         self._save_meta(meta_filepath)
         logicx_filepath = instance_dirpath.joinpath(self.__class__._logicx_filename)
@@ -106,32 +110,38 @@ class Instance(object):
         return
 
     def _load_meta(self, meta_filepath: pathlib.Path) -> None:
-        assert meta_filepath.is_file(), f'There is no \"Meta\" can be loaded from the specified path \"{meta_filepath.absolute()}\".'
+        if not meta_filepath.is_file():
+            raise FileNotFoundError(f'There is no \"Meta\" can be loaded from the specified path \"{meta_filepath.absolute()}\".')
         self._meta.load(meta_filepath)
         return
 
     def _save_meta(self, meta_filepath: pathlib.Path) -> None:
-        assert not meta_filepath.is_file(), f'\"Meta\" can not be saved into the specified path \"{meta_filepath.absolute()}\".'
+        if meta_filepath.is_file():
+            raise FileExistsError(f'\"Meta\" can not be saved into the specified path \"{meta_filepath.absolute()}\".')
         self._meta.save(meta_filepath)
         return
 
     def _load_logicx(self, logicx_filepath: pathlib.Path) -> None:
-        assert logicx_filepath.is_file(), f'There is no \"LogicX\" can be loaded from the specified path \"{logicx_filepath.absolute()}\".'
+        if not logicx_filepath.is_file():
+            raise FileNotFoundError(f'There is no \"LogicX\" can be loaded from the specified path \"{logicx_filepath.absolute()}\".')
         self._logicx.load(logicx_filepath)
         return
 
     def _save_logicx(self, logicx_filepath: pathlib.Path) -> None:
-        assert not logicx_filepath.is_file(), f'\"LogicX\" can not be saved into the specified path \"{logicx_filepath.absolute()}\".'
+        if logicx_filepath.is_file():
+            raise FileExistsError(f'\"LogicX\" can not be saved into the specified path \"{logicx_filepath.absolute()}\".')
         self._logicx.save(logicx_filepath)
         return
 
     def _load_labels(self, labels_filepath: pathlib.Path) -> None:
-        assert labels_filepath.is_file(), f'There is no \"Lables\" can be loaded from the specified path \"{labels_filepath.absolute()}\".'
+        if not labels_filepath.is_file():
+            raise FileNotFoundError(f'There is no \"Lables\" can be loaded from the specified path \"{labels_filepath.absolute()}\".')
         self._labels = [Implementation.loads(s) for s in load_json(labels_filepath)]
         return
 
     def _save_labels(self, labels_filepath: pathlib.Path) -> None:
-        assert not labels_filepath.is_file(), f'\"Labels\" can not be saved into the specified path \"{labels_filepath.absolute()}\".'
+        if labels_filepath.is_file():
+            raise FileExistsError(f'\"Labels\" can not be saved into the specified path \"{labels_filepath.absolute()}\".')
         save_json([Implementation.saves(l) for l in self._labels], labels_filepath)
         return
 
