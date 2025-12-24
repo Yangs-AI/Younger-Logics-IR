@@ -1,3 +1,19 @@
+#!/usr/bin/env python3
+# -*- encoding=utf8 -*-
+
+########################################################################
+# Created time: 2025-12-24 12:34:52
+# Author: Luzhou Peng(彭路洲) & Jason Young (杨郑鑫).
+# E-Mail: AI.Jason.Young@outlook.com
+# Last Modified by: Jason Young (杨郑鑫)
+# Last Modified time: 2025-12-24 16:02:54
+# Copyright (c) 2025 Yangs.AI
+# 
+# This source code is licensed under the Apache License 2.0 found in the
+# LICENSE file in the root directory of this source tree.
+########################################################################
+
+
 """
 To generate the model_infos for the DeepNets-1M dataset.
 """
