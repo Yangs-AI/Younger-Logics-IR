@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2024-12-29 20:02:37
+# Last Modified time: 2025-12-25 21:57:52
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -19,8 +19,8 @@ import pathlib
 from typing import Literal
 
 from younger.commons.io import load_json, save_json
-from younger.commons.logging import logger
 
+from younger_logics_ir.commons.logging import logger
 from younger_logics_ir.scripts.hubs.onnx.utils import get_onnx_hub_model_infos, get_onnx_hub_model_ids
 
 

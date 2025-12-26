@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2025-01-03 16:55:34
+# Last Modified time: 2025-12-25 21:48:46
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -19,7 +19,8 @@ import onnx
 import pathlib
 
 from younger.commons.io import create_dir
-from younger.commons.logging import logger
+
+from younger_logics_ir.commons.logging import logger
 
 
 def check_model(model_handler: onnx.ModelProto | pathlib.Path) -> bool:

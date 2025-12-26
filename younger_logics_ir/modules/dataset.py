@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2025-04-04 22:43:10
+# Last Modified time: 2025-12-25 21:54:07
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -21,11 +21,12 @@ from typing import Generator
 
 from younger.commons.io import load_json, save_json
 from younger.commons.hash import hash_strings
-from younger.commons.logging import logger
 from younger.commons.version import semantic_release, str_to_sem
 
 from younger_logics_ir.modules.stamp import Stamp
 from younger_logics_ir.modules.instance import Instance, LogicX
+
+from younger_logics_ir.commons.logging import logger
 
 
 class Dataset(object):

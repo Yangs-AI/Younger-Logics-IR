@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2025-04-27 10:03:57
+# Last Modified time: 2025-12-25 21:48:07
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -17,7 +17,7 @@
 import click
 import pathlib
 
-from younger_logics_ir.commands import equip_logger
+from younger_logics_ir.commons.logging import equip_logger
 
 
 @click.group(name='output')

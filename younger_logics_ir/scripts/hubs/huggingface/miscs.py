@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2025-02-05 16:24:43
+# Last Modified time: 2025-12-25 21:56:48
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -25,7 +25,8 @@ from tf2onnx.tfonnx import process_tf_graph
 from tf2onnx.tf_utils import compress_graph_def
 
 from younger.commons.io import get_path_size
-from younger.commons.logging import logger
+
+from younger_logics_ir.commons.logging import logger
 
 assert tensorflow.__version__ == '2.15.0', 'The current version of tensorflow is not supported by the current version of tf2onnx.'
 

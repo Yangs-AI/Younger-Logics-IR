@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2025-04-06 10:42:27
+# Last Modified time: 2025-12-25 21:55:09
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -20,9 +20,9 @@ import networkx
 import multiprocessing
 
 from younger.commons.io import create_dir, save_json
-from younger.commons.logging import logger
 
 from younger_logics_ir.modules import Instance, LogicX, Origin
+from younger_logics_ir.commons.logging import logger
 
 
 def get_opset_version(opset_import: dict[str, int]) -> int | None:

@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2024-12-30 15:27:31
+# Last Modified time: 2025-12-25 21:56:14
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -21,9 +21,9 @@ from typing import Literal
 from huggingface_hub import ModelCardData
 
 from younger.commons.string import split_camel_case_string
-from younger.commons.logging import logger
 
 from younger_logics_ir.scripts.commons.detectors import detect_task, detect_dataset_name, detect_dataset_split, detect_metric_name, normalize_metric_value
+from younger_logics_ir.commons.logging import logger
 
 
 def get_detailed_string(strings: list[str]) -> str:

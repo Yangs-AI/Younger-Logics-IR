@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2025-01-10 17:08:36
+# Last Modified time: 2025-12-25 21:57:12
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -28,9 +28,9 @@ from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE
 from younger.commons.io import save_json, delete_dir, get_human_readable_size_representation
 from younger.commons.cache import CachedChunks
 from younger.commons.string import extract_possible_digits_from_readme_string, extract_possible_tables_from_readme_string, split_front_matter_from_readme_string, README_DATE_Pattern, README_DATETIME_Pattern, README_TABLE_Pattern
-from younger.commons.logging import logger
 
 from younger_logics_ir.commons.cache import YLIR_CACHE_ROOT
+from younger_logics_ir.commons.logging import logger
 
 
 HUGGINGFACE_HUB_API_ENDPOINT = 'https://huggingface.co/api'

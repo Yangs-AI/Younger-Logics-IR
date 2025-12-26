@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2025-04-27 09:55:36
+# Last Modified time: 2025-12-25 21:58:30
 # Copyright (c) 2025 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -32,7 +32,8 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 
 from younger.commons.io import create_dir
-from younger.commons.logging import logger
+
+from younger_logics_ir.commons.logging import logger
 
 
 def extract_embedding_cos(datasets: dict[str, numpy.ndarray], output_dirpath: pathlib.Path):

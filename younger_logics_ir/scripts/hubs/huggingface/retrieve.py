@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2025-01-06 22:21:09
+# Last Modified time: 2025-12-25 21:56:56
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -20,7 +20,8 @@ import pathlib
 from typing import Literal
 
 from younger.commons.io import save_json
-from younger.commons.logging import logger
+
+from younger_logics_ir.commons.logging import logger
 
 from .utils import get_huggingface_hub_model_infos, get_huggingface_hub_model_ids, get_huggingface_hub_metric_infos, get_huggingface_hub_metric_ids, get_huggingface_hub_task_infos, get_huggingface_hub_task_ids
 

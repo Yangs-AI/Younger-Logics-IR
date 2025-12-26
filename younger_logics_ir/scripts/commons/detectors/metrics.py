@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫) & Luzhou Peng (彭路洲).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2024-11-27 15:29:04
+# Last Modified time: 2025-12-25 21:55:55
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -16,7 +16,7 @@
 
 import re
 
-from younger.commons.logging import logger
+from younger_logics_ir.commons.logging import logger
 
 
 score_0_oo_metrics = set([
