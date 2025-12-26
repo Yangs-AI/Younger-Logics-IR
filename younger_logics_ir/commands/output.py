@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2025-12-25 21:48:07
+# Last Modified time: 2025-12-26 04:18:43
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -37,7 +37,7 @@ def output_filter(
     worker_number,
     logging_filepath,
 ):
-    equip_logger(logging_filepath)
+    equip_logger(logging_filepath=logging_filepath)
 
     from younger_logics_ir.scripts.bootstrap import filter
 

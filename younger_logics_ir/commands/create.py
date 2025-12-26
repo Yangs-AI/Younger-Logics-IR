@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2025-12-25 21:47:52
+# Last Modified time: 2025-12-26 04:17:39
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -52,7 +52,7 @@ def create_onnx_retrieve_huggingface(
     worker_number,
     logging_filepath,
 ):
-    equip_logger(logging_filepath)
+    equip_logger(logging_filepath=logging_filepath)
 
     from younger_logics_ir.scripts.hubs.huggingface import retrieve
 
@@ -76,7 +76,7 @@ def create_onnx_retrieve_onnx(
     force_reload,
     logging_filepath,
 ):
-    equip_logger(logging_filepath)
+    equip_logger(logging_filepath=logging_filepath)
 
     from younger_logics_ir.scripts.hubs.onnx import retrieve
 
@@ -98,7 +98,7 @@ def create_onnx_retrieve_torch(
     force_reload,
     logging_filepath,
 ):
-    equip_logger(logging_filepath)
+    equip_logger(logging_filepath=logging_filepath)
 
     from younger_logics_ir.scripts.hubs.torch import retrieve
 
@@ -131,7 +131,7 @@ def create_onnx_convert_huggingface(
     device, framework, model_size_limit_l, model_size_limit_r, token, estimate,
     logging_filepath
 ):
-    equip_logger(logging_filepath)
+    equip_logger(logging_filepath=logging_filepath)
 
     from younger_logics_ir.scripts.hubs.huggingface import convert
 
@@ -148,7 +148,7 @@ def create_onnx_convert_onnx(
     save_dirpath, cache_dirpath,
     logging_filepath
 ):
-    equip_logger(logging_filepath)
+    equip_logger(logging_filepath=logging_filepath)
 
     from younger_logics_ir.scripts.hubs.onnx import convert
 
@@ -165,7 +165,7 @@ def create_onnx_convert_torch(
     save_dirpath, cache_dirpath,
     logging_filepath
 ):
-    equip_logger(logging_filepath)
+    equip_logger(logging_filepath=logging_filepath)
 
     from younger_logics_ir.scripts.hubs.torch import convert
 

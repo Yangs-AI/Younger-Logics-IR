@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2025-04-05 15:30:32
+# Last Modified time: 2025-12-26 04:20:09
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -26,6 +26,3 @@ __thename__ = YoungerHandle.LogicsName + '-' + 'IR'
 
 
 # Import submodules after __thename__ is defined to avoid circular import
-from . import commons
-from . import modules
-from . import converters
