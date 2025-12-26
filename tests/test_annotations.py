@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-#
-# Copyright (c) Jason Young (杨郑鑫).
-#
-# E-Mail: <AI.Jason.Young@outlook.com>
-# 2024-04-14 09:22
-#
-# This source code is licensed under the Apache-2.0 license found in the
+# -*- encoding=utf8 -*-
+
+########################################################################
+# Created time: 2025-12-25 02:10:59
+# Author: Jason Young (杨郑鑫).
+# E-Mail: AI.Jason.Young@outlook.com
+# Last Modified by: Jason Young (杨郑鑫)
+# Last Modified time: 2025-12-26 03:51:23
+# Copyright (c) 2025 Yangs.AI
+# 
+# This source code is licensed under the Apache License 2.0 found in the
 # LICENSE file in the root directory of this source tree.
+########################################################################
 
 
 from younger.datasets.constructors.huggingface.annotations import parse_dataset, parse_metric, normalize_metric_value
