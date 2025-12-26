@@ -14,10 +14,6 @@
 ########################################################################
 
 
-from . import commons
-from . import modules
-from . import converters
-
 import importlib.metadata
 
 from younger.commons.constants import YoungerHandle
@@ -27,3 +23,9 @@ __version__ = importlib.metadata.version("younger_logics_ir")
 
 
 __thename__ = YoungerHandle.LogicsName + '-' + 'IR'
+
+
+# Import submodules after __thename__ is defined to avoid circular import
+from . import commons
+from . import modules
+from . import converters
