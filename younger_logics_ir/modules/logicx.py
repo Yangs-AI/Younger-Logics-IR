@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2025-04-06 10:51:45
+# Last Modified time: 2025-12-28 22:36:51
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -30,8 +30,8 @@ class LogicX(object):
 
     __DAGHead__ = 'YLIR-DAG-'
 
-    def __init__(self, src: Literal['onnx', 'core'] | None = None, dag: networkx.DiGraph | None = None):
-        assert src in {'onnx', 'core'} or src is None, f'Argument \"src\" must be in {{"onnx", "core"}} instead \"{type(src)}\"!'
+    def __init__(self, src: Literal['onnx', 'code'] | None = None, dag: networkx.DiGraph | None = None):
+        assert src in {'onnx', 'code'} or src is None, f'Argument \"src\" must be in {{"onnx", "code"}} instead \"{type(src)}\"!'
         assert isinstance(dag, networkx.DiGraph) or dag is None, f'Argument \"dag\" must be `networkx.DiGraph` instead \"{type(dag)}\"!'
         self._src = src
         self._dag = dag
@@ -55,15 +55,15 @@ class LogicX(object):
         return self._dag is not None
 
     @property
-    def src(self) -> Literal['onnx', 'core'] | None:
+    def src(self) -> Literal['onnx', 'code'] | None:
         return self._src
 
     @property
     def dag(self) -> networkx.DiGraph | None:
         return self._dag
 
-    def setup_src(self, src: Literal['onnx', 'core']) -> None:
-        assert src in {'onnx', 'core'}, f'Argument \"src\" must be in {{"onnx", "core"}} instead \"{type(src)}\"!'
+    def setup_src(self, src: Literal['onnx', 'code']) -> None:
+        assert src in {'onnx', 'code'}, f'Argument \"src\" must be in {{"onnx", "code"}} instead \"{type(src)}\"!'
         self._src = src
 
     def setup_dag(self, dag: networkx.DiGraph) -> None:

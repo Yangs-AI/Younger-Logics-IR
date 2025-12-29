@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2025-12-26 03:50:33
+# Last Modified time: 2025-12-29 00:11:05
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -35,7 +35,7 @@ def convert(model_handler: onnx.ModelProto | str) -> LogicX:
         logicx = LogicX(dag=convert_onnx_to_ir(model_handler), src='onnx')
 
     if isinstance(model_handler, str):
-        logicx = LogicX(dag=convert_code_to_ir(model_handler), src='core')
+        logicx = LogicX(dag=convert_code_to_ir(model_handler), src='code')
 
     assert logicx.valid, f'LogicX has not been setup correctly! Validate - LogicX.dag: {logicx.dag_valid}; LogicX.src: {logicx.src_valid}'
 

@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2025-12-26 04:17:39
+# Last Modified time: 2025-12-29 00:10:16
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -172,11 +172,11 @@ def create_onnx_convert_torch(
     convert.main(model_infos_filepath, save_dirpath, cache_dirpath)
 
 
-@create.group(name='core')
-def create_core():
+@create.group(name='code')
+def create_code():
     pass
 
 
-@create_core.group(name='convert')
-def create_core_convert():
+@create_code.group(name='convert')
+def create_code_convert():
     pass
