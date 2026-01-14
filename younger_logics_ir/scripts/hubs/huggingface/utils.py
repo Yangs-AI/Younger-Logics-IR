@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2026-01-14 03:56:05
+# Last Modified time: 2026-01-14 04:50:28
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -157,7 +157,7 @@ def get_all_data_from_huggingface_hub_api(path: str, params: dict | None = None,
 
     session = requests.Session()
     headers = utils.build_hf_headers(token=token)
-    
+
     # First page
     _apply_rate_limit()
     response = session.get(path, params=params, headers=headers)
@@ -461,7 +461,7 @@ def extract_possible_metrics_from_readme(readme: str) -> dict[str, list[str] | l
     readme = re.sub(README_DATETIME_Pattern, '', readme)
 
     possible_metrics['digit_related'] = extract_possible_digits_from_readme_string(readme)
-    
+
     return possible_metrics
 
 
