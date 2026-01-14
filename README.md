@@ -23,3 +23,14 @@ sudo apt install graphviz
 ```
 conda install conda-forge::python-graphviz
 ```
+
+##### Usage
+
+```
+younger logics ir create onnx retrieve huggingface \
+    --mode Metric_Infos \
+    --save-dirpath /path/to/working_directory/ \
+    --token <HF_API_TOKEN> \
+    --number-per-file 100000 \
+    --logging-filepath /path/to/working_directory/.younger.log
+```
