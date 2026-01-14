@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2025-12-25 21:57:12
+# Last Modified time: 2026-01-14 02:53:38
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -16,6 +16,7 @@
 
 import os
 import re
+import time
 import tqdm
 import pathlib
 import requests
@@ -35,83 +36,203 @@ from younger_logics_ir.commons.logging import logger
 
 HUGGINGFACE_HUB_API_ENDPOINT = 'https://huggingface.co/api'
 
+# Rate limit configuration
+# Default: 1000 requests per 5 minutes (300s) => ~3.33 req/s
+# Maintain ~90% of limit to stay safe: 300s / (limit * 0.9)
+_rate_limit = 1000
+_last_api_request_time = 0.0
+_api_request_interval_sec = 300.0 / (_rate_limit * 0.9)
+
+def set_rate_limit(rate_limit: int):
+    """Configure the rate limit and recalculate request interval.
+
+    :param rate_limit: Maximum number of requests allowed per 5 minutes
+    """
+    global _rate_limit, _api_request_interval_sec
+    _rate_limit = rate_limit
+    # Use 90% of the limit to maintain safety margin
+    _api_request_interval_sec = 300.0 / (_rate_limit * 0.9)
+    logger.info(f"Rate limit set to {_rate_limit} requests/5min. Request interval: {_api_request_interval_sec:.3f}s (~{1/_api_request_interval_sec:.2f} req/s)")
+
+
+def _apply_rate_limit():
+    """Apply request rate limiting to stay under configured API limits."""
+    global _last_api_request_time
+    elapsed = time.time() - _last_api_request_time
+    if elapsed < _api_request_interval_sec:
+        time.sleep(_api_request_interval_sec - elapsed)
+    _last_api_request_time = time.time()
+
+
+def _extract_rate_limit_reset_time(headers: dict) -> float | None:
+    """Extract the rate limit reset time in seconds from response headers.
+
+    Tries RateLimit-Reset-After (in seconds) first, then falls back to Retry-After.
+
+    :param headers: Response headers dictionary
+    :return: Seconds to wait, or None if not found
+    """
+    # Try HuggingFace's RateLimit-Reset-After header (seconds)
+    reset_after = headers.get('RateLimit-Reset-After')
+    if reset_after is not None:
+        try:
+            return float(reset_after)
+        except (ValueError, TypeError):
+            pass
+
+    # Fall back to standard Retry-After header
+    retry_after = headers.get('Retry-After')
+    if retry_after is not None:
+        try:
+            return float(retry_after)
+        except (ValueError, TypeError):
+            pass
+
+    return None
+
 
 def get_one_data_from_huggingface_hub_api(path: str, params: dict | None = None, token: str | None = None) -> Any:
     """
-    _summary_
+    Fetch single data from Hugging Face API with rate limiting.
+    On 429, parses RateLimit header and retries once after waiting.
 
-    :param path: _description_
-    :type path: str
-    :param params: _description_, defaults to None
-    :type params: dict | None, optional
-    :param token: _description_, defaults to None
-    :type token: str | None, optional
-
-    :yield: _description_
-    :rtype: Any
-
-    .. note::
-        The Code are modified based on the official Hugging Face Hub source codes. (https://github.com/huggingface/huggingface_hub/blob/main/src/huggingface_hub/utils/_pagination.py)
-        `paginate` is called by list_models, list_datasets, and list_spaces methods of huggingface_hub.HfApi;
+    :param path: API endpoint
+    :param params: Query parameters
+    :param token: Hugging Face token
+    :return: Response JSON or None on error
     """
-
     params = params or dict()
+    # Enforce limit=1000 to maximize items per request
+    params['limit'] = 1000
 
     session = requests.Session()
     headers = utils.build_hf_headers(token=token)
+
+    # First attempt
+    _apply_rate_limit()
     response = session.get(path, params=params, headers=headers)
     try:
         utils.hf_raise_for_status(response)
         return response.json()
+    except requests.exceptions.HTTPError as e:
+        status = response.status_code
+        if status == 429:
+            # Parse RateLimit header (official HF SDK approach)
+            reset_time = _extract_rate_limit_reset_time(response.headers)
+            if reset_time is not None and reset_time > 0:
+                logger.warning(f"HF API 429 (rate limited). Waiting {reset_time:.1f}s as per RateLimit header...")
+                time.sleep(reset_time)
+                # Single retry after waiting
+                response = session.get(path, params=params, headers=headers)
+                try:
+                    utils.hf_raise_for_status(response)
+                    return response.json()
+                except Exception as retry_e:
+                    logger.error(f"HF API retry after 429 failed: {retry_e}")
+                    return None
+            else:
+                logger.warning(f"HF API 429 but no valid RateLimit header. Aborting.")
+                return None
+        else:
+            logger.error(f"HF API request failed for '{path}' with status {status}: {e}")
+            return None
     except utils.HfHubHTTPError as e:
-        print(f'Request: {path} {e.request_id} - {e.server_message}')
+        logger.error(f'Request: {path} {e.request_id} - {e.server_message}')
         return None
 
 
 def get_all_data_from_huggingface_hub_api(path: str, params: dict | None = None, token: str | None = None) -> Generator[Any, None, None]:
     """
-    _summary_
+    Paginate through Hugging Face API with rate limiting to stay within configured req/5min quota.
+    On 429, parses RateLimit header and retries once after waiting.
 
-    :param path: _description_
-    :type path: str
-    :param params: _description_, defaults to None
-    :type params: dict | None, optional
-    :param token: _description_, defaults to None
-    :type token: str | None, optional
-
-    :yield: _description_
-    :rtype: Generator[Any, None, None]
-
-    .. note::
-        The Code are modified based on the official Hugging Face Hub source codes. (https://github.com/huggingface/huggingface_hub/blob/main/src/huggingface_hub/utils/_pagination.py)
-        `paginate` is called by list_models, list_datasets, and list_spaces methods of huggingface_hub.HfApi;
+    :param path: API endpoint path
+    :param params: Query parameters
+    :param token: Hugging Face token
+    :yield: Items from all pages
     """
-
     params = params or dict()
+    # Enforce limit=1000 to maximize items per request
+    params['limit'] = 1000
 
     session = requests.Session()
     headers = utils.build_hf_headers(token=token)
+    
+    # First page
+    _apply_rate_limit()
     response = session.get(path, params=params, headers=headers)
     try:
         utils.hf_raise_for_status(response)
         yield from response.json()
         next_page_path = response.links.get("next", {}).get("url")
+    except requests.exceptions.HTTPError as e:
+        status = response.status_code
+        if status == 429:
+            # Parse RateLimit header (official HF SDK approach)
+            reset_time = _extract_rate_limit_reset_time(response.headers)
+            if reset_time is not None and reset_time > 0:
+                logger.warning(f"HF API 429 on first page. Waiting {reset_time:.1f}s as per RateLimit header...")
+                time.sleep(reset_time)
+                # Single retry after waiting
+                response = session.get(path, params=params, headers=headers)
+                try:
+                    utils.hf_raise_for_status(response)
+                    yield from response.json()
+                    next_page_path = response.links.get("next", {}).get("url")
+                except Exception as retry_e:
+                    logger.error(f"HF API retry after 429 failed: {retry_e}")
+                    yield from ()
+                    next_page_path = None
+            else:
+                logger.warning(f"HF API 429 but no valid RateLimit header. Aborting pagination.")
+                yield from ()
+                next_page_path = None
+        else:
+            logger.error(f"HF API request failed for '{path}' with status {status}: {e}")
+            yield from ()
+            next_page_path = None
     except utils.HfHubHTTPError as e:
-        print(f'Request: {path} {e.request_id} - {e.server_message}')
+        logger.error(f'Request failed: {e.request_id} - {e.server_message}')
         yield from ()
         next_page_path = None
 
     # Follow pages
-    # Next link already contains query params
     while next_page_path is not None:
-        logger.debug(f"Pagination detected. Requesting next page: {next_page_path}")
+        _apply_rate_limit()
+        logger.debug(f"Pagination: fetching next page")
         response = session.get(next_page_path, headers=headers)
         try:
             utils.hf_raise_for_status(response)
             yield from response.json()
             next_page_path = response.links.get("next", {}).get("url")
+        except requests.exceptions.HTTPError as e:
+            status = response.status_code
+            if status == 429:
+                # Parse RateLimit header (official HF SDK approach)
+                reset_time = _extract_rate_limit_reset_time(response.headers)
+                if reset_time is not None and reset_time > 0:
+                    logger.warning(f"HF API 429 on next page. Waiting {reset_time:.1f}s as per RateLimit header...")
+                    time.sleep(reset_time)
+                    # Single retry after waiting
+                    response = session.get(next_page_path, headers=headers)
+                    try:
+                        utils.hf_raise_for_status(response)
+                        yield from response.json()
+                        next_page_path = response.links.get("next", {}).get("url")
+                    except Exception as retry_e:
+                        logger.error(f"HF API retry after 429 failed: {retry_e}")
+                        yield from ()
+                        next_page_path = None
+                else:
+                    logger.warning(f"HF API 429 on next page but no valid RateLimit header. Aborting pagination.")
+                    yield from ()
+                    next_page_path = None
+            else:
+                logger.error(f"HF API pagination request failed with status {status}: {e}")
+                yield from ()
+                next_page_path = None
         except utils.HfHubHTTPError as e:
-            print(f'Request: {path} {e.request_id} - {e.server_message}')
+            logger.error(f'Pagination request failed: {e.request_id} - {e.server_message}')
             yield from ()
             next_page_path = None
 
@@ -121,10 +242,12 @@ def get_all_data_from_huggingface_hub_api(path: str, params: dict | None = None,
 #############################################################################################################
 
 
-def get_huggingface_hub_model_ids(token: str | None = None) -> Generator[str, None, None]:
+def get_huggingface_hub_model_ids(token: str | None = None) -> Generator[dict, None, None]:
     models_path = f'{HUGGINGFACE_HUB_API_ENDPOINT}/models'
-    models = get_all_data_from_huggingface_hub_api(models_path, params=dict(sort='lastModified', direction=-1, expand=['lastModified']), token=token)
-    return (model['id'] for model in models)
+    # Fetch models with minimal payload: no expand, just sort/direction (limit set by pagination)
+    # Returns full model objects (id, lastModified, etc.) to preserve metadata without extra API calls
+    models = get_all_data_from_huggingface_hub_api(models_path, params=dict(sort='lastModified', direction=-1), token=token)
+    return models
 
 
 def get_huggingface_hub_metric_ids(token: str | None = None) -> list[str]:
@@ -141,7 +264,7 @@ def get_huggingface_hub_task_ids(token: str | None = None) -> list[str]:
     return task_ids
 
 
-def get_huggingface_hub_model_infos(save_dirpath: pathlib.Path, token: str | None = None, number_per_file: int | None = None, worker_number: int | None = None):
+def get_huggingface_hub_model_infos(save_dirpath: pathlib.Path, token: str | None = None, number_per_file: int | None = None, worker_number: int | None = None, include_storage: bool = False):
     models_path = f'{HUGGINGFACE_HUB_API_ENDPOINT}/models'
 
     cache_dirpath = YLIR_CACHE_ROOT.joinpath(f'retrieve_hf')
@@ -155,31 +278,45 @@ def get_huggingface_hub_model_infos(save_dirpath: pathlib.Path, token: str | Non
     )
     logger.info(f' ^ Total = {len(chunks_of_simple_model_infos)}.')
 
-    logger.info(f' v Retrieving All Model Infos ...')
+    if include_storage:
+        logger.info(f' v Retrieving All Model Infos (Storage included) ...')
+    else:
+        logger.info(f' v Retrieving All Model Infos (Storage excluded) ...')
+
     with tqdm.tqdm(initial=chunks_of_simple_model_infos.current_position, total=len(chunks_of_simple_model_infos), desc='Retrieve Model') as progress_bar:
         for chunk_of_simple_model_infos in chunks_of_simple_model_infos:
             model_infos_per_file = list()
-            if worker_number is None:
-                for simple_model_info in chunk_of_simple_model_infos:
-                    model_id = simple_model_info['id']
-                    model_storage = get_huggingface_hub_model_storage(model_id, simple=True, token=token)
-                    progress_bar.set_description(f'Retrieve Model - {model_id}')
-                    simple_model_info['usedStorage'] = model_storage
-                    model_infos_per_file.append(simple_model_info)
-                    progress_bar.update(1)
-            else:
-                with multiprocessing.Pool(worker_number) as pool:
-                    logger.info(f' - Assign Tasks ... ')
-                    model_storages = [pool.apply_async(get_huggingface_hub_model_storage, (simple_model_info['id'], True, token)) for simple_model_info in chunk_of_simple_model_infos]
 
-                    logger.info(f' - Get Results ... ')
-                    for model_storage, simple_model_info in zip(model_storages, chunk_of_simple_model_infos):
-                        model_storage = model_storage.get()
+            if include_storage:
+                # Retrieve storage information for each model
+                if worker_number is None:
+                    for simple_model_info in chunk_of_simple_model_infos:
                         model_id = simple_model_info['id']
+                        model_storage = get_huggingface_hub_model_storage(model_id, simple=True, token=token)
                         progress_bar.set_description(f'Retrieve Model - {model_id}')
                         simple_model_info['usedStorage'] = model_storage
                         model_infos_per_file.append(simple_model_info)
                         progress_bar.update(1)
+                else:
+                    with multiprocessing.Pool(worker_number) as pool:
+                        logger.info(f' - Assign Tasks ... ')
+                        model_storages = [pool.apply_async(get_huggingface_hub_model_storage, (simple_model_info['id'], True, token)) for simple_model_info in chunk_of_simple_model_infos]
+
+                        logger.info(f' - Get Results ... ')
+                        for model_storage, simple_model_info in zip(model_storages, chunk_of_simple_model_infos):
+                            model_storage = model_storage.get()
+                            model_id = simple_model_info['id']
+                            progress_bar.set_description(f'Retrieve Model - {model_id}')
+                            simple_model_info['usedStorage'] = model_storage
+                            model_infos_per_file.append(simple_model_info)
+                            progress_bar.update(1)
+            else:
+                # Skip storage retrieval, just copy model infos
+                for simple_model_info in chunk_of_simple_model_infos:
+                    model_id = simple_model_info['id']
+                    progress_bar.set_description(f'Retrieve Model - {model_id}')
+                    model_infos_per_file.append(simple_model_info)
+                    progress_bar.update(1)
 
             save_filepath = save_dirpath.joinpath(f'huggingface_hub_model_infos_{chunks_of_simple_model_infos.current_chunk_id}.json')
             save_json(model_infos_per_file, save_filepath, indent=2)

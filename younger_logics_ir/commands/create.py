@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2025-12-29 00:10:16
+# Last Modified time: 2026-01-14 02:56:29
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -36,13 +36,15 @@ def create_onnx_retrieve():
 
 
 @create_onnx_retrieve.command(name='huggingface')
-@click.option('--mode',             required=True,  type=click.Choice(['Model_Infos', 'Model_IDs', 'Metric_Infos', 'Metric_IDs', 'Task_Infos', 'Task_IDs'], case_sensitive=True), help='Indicates the type of data that needs to be retrieved from Huggingface.')
-@click.option('--save-dirpath',     required=True,  type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=pathlib.Path), help='The directory where the data will be saved.')
-@click.option('--token',            required=False, type=str, default=None, help='The HuggingFace token, which requires registering an account on HuggingFace and manually setting the access token. If None, retrieve without HuggingFace access token.')
-@click.option('--mirror-url',       required=False, type=str, default='', help='The URL of the HuggingFace mirror site, which may sometimes speed up your data retrieval process, but this tools cannot guarantee data integrity of the mirror site. If not specified, use HuggingFace official site.')
-@click.option('--number-per-file',  required=False, type=int, default=None, help='Used to specify the number of data items saved in each file. If None, all data will be saved in a single file.')
-@click.option('--worker-number',    required=False, type=int, default=None, help='Used to indicate how many processes are concurrently performing the model conversion tasks.')
-@click.option('--logging-filepath', required=False, type=click.Path(exists=False, file_okay=True, dir_okay=False, path_type=pathlib.Path), default=None, help='Path to the log file; if not provided, defaults to outputting to the terminal only.')
+@click.option('--mode',                  required=True,  type=click.Choice(['Model_Infos', 'Model_IDs', 'Metric_Infos', 'Metric_IDs', 'Task_Infos', 'Task_IDs'], case_sensitive=True), help='Indicates the type of data that needs to be retrieved from Huggingface.')
+@click.option('--save-dirpath',          required=True,  type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=pathlib.Path), help='The directory where the data will be saved.')
+@click.option('--token',                 required=False, type=str, default=None, help='The HuggingFace token, which requires registering an account on HuggingFace and manually setting the access token. If None, retrieve without HuggingFace access token.')
+@click.option('--mirror-url',            required=False, type=str, default='', help='The URL of the HuggingFace mirror site, which may sometimes speed up your data retrieval process, but this tools cannot guarantee data integrity of the mirror site. If not specified, use HuggingFace official site.')
+@click.option('--number-per-file',       required=False, type=int, default=None, help='Used to specify the number of data items saved in each file. If None, all data will be saved in a single file.')
+@click.option('--worker-number',         required=False, type=int, default=None, help='Used to indicate how many processes are concurrently performing the model conversion tasks.')
+@click.option('--rate-limit',            required=False, type=int, default=1000, help='API rate limit: max requests in the last 5 minutes. Default: 1000. Interval is calculated as 300s / (rate_limit * 0.9).')
+@click.option('--include-storage',       is_flag=True,   help='For Model_Infos mode: include usedStorage field for each model (requires additional API calls). Default: skip storage retrieval to save API quota.')
+@click.option('--logging-filepath',      required=False, type=click.Path(exists=False, file_okay=True, dir_okay=False, path_type=pathlib.Path), default=None, help='Path to the log file; if not provided, defaults to outputting to the terminal only.')
 def create_onnx_retrieve_huggingface(
     mode,
     save_dirpath,
@@ -50,6 +52,8 @@ def create_onnx_retrieve_huggingface(
     mirror_url,
     number_per_file,
     worker_number,
+    rate_limit,
+    include_storage,
     logging_filepath,
 ):
     equip_logger(logging_filepath=logging_filepath)
@@ -59,7 +63,9 @@ def create_onnx_retrieve_huggingface(
     kwargs = dict(
         token=token,
         number_per_file=number_per_file,
-        worker_number=worker_number
+        worker_number=worker_number,
+        rate_limit=rate_limit,
+        include_storage=include_storage,
     )
 
     retrieve.main(mode, save_dirpath, mirror_url, **kwargs)
