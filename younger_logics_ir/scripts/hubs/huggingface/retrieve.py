@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2026-01-14 02:57:17
+# Last Modified time: 2026-01-14 03:56:19
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -23,7 +23,7 @@ from younger.commons.io import save_json
 
 from younger_logics_ir.commons.logging import logger
 
-from .utils import get_huggingface_hub_model_infos, get_huggingface_hub_model_ids, get_huggingface_hub_metric_infos, get_huggingface_hub_metric_ids, get_huggingface_hub_task_infos, get_huggingface_hub_task_ids, set_rate_limit
+from .utils import get_huggingface_hub_model_infos, get_huggingface_hub_model_ids, get_huggingface_hub_metric_infos, get_huggingface_hub_task_infos, set_rate_limit
 
 
 def save_huggingface_model_infos(save_dirpath: pathlib.Path, token: str | None = None, number_per_file: int | None = None, worker_number: int | None = None, include_storage: bool = False):
@@ -63,48 +63,15 @@ def save_huggingface_model_ids(save_dirpath: pathlib.Path, token: str | None = N
 
 
 def save_huggingface_metric_infos(save_dirpath: pathlib.Path, token: str | None = None) -> None:
-    times = 0
-    finished = False
-    while not finished:
-        try:
-            get_huggingface_hub_metric_infos(save_dirpath, token=token)
-            finished = True
-        except:
-            finished = False
-            times += 1
-            logger.info(f'!!! Not Finished (No. 1): Another Try ... ')
-
-
-def save_huggingface_metric_ids(save_dirpath: pathlib.Path, token: str | None = None) -> None:
-    metric_ids = get_huggingface_hub_metric_ids(token=token)
-    save_filepath = save_dirpath.joinpath('huggingface_metric_ids.json')
-    save_json(metric_ids, save_filepath, indent=2)
-    logger.info(f'Total {len(metric_ids)} Metric IDs. Results Saved In: \'{save_filepath}\'.')
+    get_huggingface_hub_metric_infos(save_dirpath, token=token)
 
 
 def save_huggingface_task_infos(save_dirpath: pathlib.Path, token: str | None = None) -> None:
     get_huggingface_hub_task_infos(save_dirpath, token=token)
-    # times = 0
-    # finished = False
-    # while not finished:
-    #     try:
-    #         get_huggingface_hub_task_infos(save_dirpath, token=token)
-    #         finished = True
-    #     except:
-    #         finished = False
-    #         times += 1
-    #         logger.info(f'!!! Not Finished (No. 1): Another Try ... ')
 
 
-def save_huggingface_task_ids(save_dirpath: pathlib.Path, token: str | None = None) -> None:
-    task_ids = get_huggingface_hub_task_ids(token=token)
-    save_filepath = save_dirpath.joinpath('huggingface_task_ids.json')
-    save_json(task_ids, save_filepath, indent=2)
-    logger.info(f'Total {len(task_ids)} Task IDs. Results Saved In: \'{save_filepath}\'.')
-
-
-def main(mode: Literal['Model_Infos', 'Model_IDs', 'Metric_Infos', 'Metric_IDs', 'Task_Infos', 'Task_IDs'], save_dirpath: pathlib.Path, mirror_url: str, **kwargs) -> None:
-    assert mode in {'Model_Infos', 'Model_IDs', 'Metric_Infos', 'Metric_IDs', 'Task_Infos', 'Task_IDs'}
+def main(mode: Literal['Model_Infos', 'Model_IDs', 'Metric_Infos', 'Task_Infos'], save_dirpath: pathlib.Path, mirror_url: str, **kwargs) -> None:
+    assert mode in {'Model_Infos', 'Model_IDs', 'Metric_Infos', 'Task_Infos'}, f'Unsupported Mode: {mode}.'
 
     os.environ['HF_ENDPOINT'] = 'https://huggingface.co/' if mirror_url == '' else mirror_url
     # Set up rate limiting in utils module
@@ -122,14 +89,6 @@ def main(mode: Literal['Model_Infos', 'Model_IDs', 'Metric_Infos', 'Metric_IDs',
         save_huggingface_metric_infos(save_dirpath, token=kwargs['token'])
         return
 
-    if mode == 'Metric_IDs':
-        save_huggingface_metric_ids(save_dirpath, token=kwargs['token'])
-        return
-
     if mode == 'Task_Infos':
         save_huggingface_task_infos(save_dirpath, token=kwargs['token'])
-        return
-
-    if mode == 'Task_IDs':
-        save_huggingface_task_ids(save_dirpath, token=kwargs['token'])
         return

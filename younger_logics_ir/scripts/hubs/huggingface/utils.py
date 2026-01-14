@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2026-01-14 02:53:38
+# Last Modified time: 2026-01-14 03:56:05
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -250,20 +250,6 @@ def get_huggingface_hub_model_ids(token: str | None = None) -> Generator[dict, N
     return models
 
 
-def get_huggingface_hub_metric_ids(token: str | None = None) -> list[str]:
-    metrics_path = f'{HUGGINGFACE_HUB_API_ENDPOINT}/metrics'
-    metrics = get_all_data_from_huggingface_hub_api(metrics_path, token=token)
-    metric_ids = [metric['id'] for metric in metrics]
-    return metric_ids
-
-
-def get_huggingface_hub_task_ids(token: str | None = None) -> list[str]:
-    tasks_path = f'{HUGGINGFACE_HUB_API_ENDPOINT}/tasks'
-    tasks = get_all_data_from_huggingface_hub_api(tasks_path, token=token)
-    task_ids = [task_id for task_id, task_info in tasks.items()]
-    return task_ids
-
-
 def get_huggingface_hub_model_infos(save_dirpath: pathlib.Path, token: str | None = None, number_per_file: int | None = None, worker_number: int | None = None, include_storage: bool = False):
     models_path = f'{HUGGINGFACE_HUB_API_ENDPOINT}/models'
 
@@ -337,7 +323,7 @@ def get_huggingface_hub_metric_infos(save_dirpath: pathlib.Path, token: str | No
 def get_huggingface_hub_task_infos(save_dirpath: pathlib.Path, token: str | None = None):
     tasks_path = f'{HUGGINGFACE_HUB_API_ENDPOINT}/tasks'
     tasks = get_all_data_from_huggingface_hub_api(tasks_path, token=token)
-    task_infos = [task_info for task_id, task_info in tasks.items()]
+    task_infos = [task for task in tasks]
     save_filepath = save_dirpath.joinpath('huggingface_task_infos.json')
     save_json(task_infos, save_filepath, indent=2)
     logger.info(f'Total {len(task_infos)} Tasks Infos. Results Saved In: \'{save_filepath}\'.')
@@ -480,7 +466,7 @@ def extract_possible_metrics_from_readme(readme: str) -> dict[str, list[str] | l
 
 
 ##############################################################################################
-# vvv Below is the functions to handle the README.md files of models in Hugging Face Hub vvv #
+# ^^^ Above is the functions to handle the README.md files of models in Hugging Face Hub ^^^ #
 ##############################################################################################
 
 

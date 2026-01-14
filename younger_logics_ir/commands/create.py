@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2026-01-14 02:56:29
+# Last Modified time: 2026-01-14 03:57:02
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -36,7 +36,7 @@ def create_onnx_retrieve():
 
 
 @create_onnx_retrieve.command(name='huggingface')
-@click.option('--mode',                  required=True,  type=click.Choice(['Model_Infos', 'Model_IDs', 'Metric_Infos', 'Metric_IDs', 'Task_Infos', 'Task_IDs'], case_sensitive=True), help='Indicates the type of data that needs to be retrieved from Huggingface.')
+@click.option('--mode',                  required=True,  type=click.Choice(['Model_Infos', 'Model_IDs', 'Metric_Infos', 'Task_Infos'], case_sensitive=True), help='Indicates the type of data that needs to be retrieved from Huggingface.')
 @click.option('--save-dirpath',          required=True,  type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=pathlib.Path), help='The directory where the data will be saved.')
 @click.option('--token',                 required=False, type=str, default=None, help='The HuggingFace token, which requires registering an account on HuggingFace and manually setting the access token. If None, retrieve without HuggingFace access token.')
 @click.option('--mirror-url',            required=False, type=str, default='', help='The URL of the HuggingFace mirror site, which may sometimes speed up your data retrieval process, but this tools cannot guarantee data integrity of the mirror site. If not specified, use HuggingFace official site.')
