@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2025-12-28 22:36:51
+# Last Modified time: 2026-01-19 10:04:04
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -90,10 +90,10 @@ class LogicX(object):
         """
         Get node features by node index.
 
-        :param node_index: _description_
+        :param node_index: The index of the node.
         :type node_index: str
 
-        :return: _description_
+        :return: Node features dictionary containing node type and attributes.
         :rtype: dict[str, str | dict | int]
 
         Format - {node_type: str, node_attr: dict}
