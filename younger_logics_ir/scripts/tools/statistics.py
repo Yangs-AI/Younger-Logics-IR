@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2025-12-25 21:58:40
+# Last Modified time: 2026-01-19 15:43:48
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -36,6 +36,18 @@ from younger_logics_ir.commons.logging import logger
 
 
 def extract_junior_statistics(datasets: dict[str, list[pathlib.Path]], output_dirpath: pathlib.Path):
+    """
+    Extract Junior Statistics for LogicX Datasets.
+    For Each Dataset, We Extract:
+        1. The (number of nodes, number of edges) with max number of nodes/edges.
+        2. Operator Details & Occurence.
+        3. Edge Details & Occurence.
+
+    :param datasets: A dictionary of dataset names to a list of LogicX file paths in that dataset.
+    :type datasets: dict[str, list[pathlib.Path]]
+    :param output_dirpath: The output directory path to save the statistics. Filename will be `{dataset_name}_logicx_junior_statistics.json`.
+    :type output_dirpath: pathlib.Path
+    """
     for dataset_name, logicx_filepaths in datasets.items():
         logger.info(f'Now - {dataset_name}')
         ne_with_max_non = dict(
@@ -49,6 +61,8 @@ def extract_junior_statistics(datasets: dict[str, list[pathlib.Path]], output_di
 
         operator_details: dict[str, tuple[str, str, dict]] = dict()
         operator_occurence: dict[str, int] = dict()
+        edge_details: dict[str, tuple[str, str, str, str]] = dict()
+        edge_occurence: dict[str, int] = dict()
         detailed_statistics: dict[str, Any] = dict()
         for logicx_filepath in tqdm.tqdm(logicx_filepaths):
             logicx = LogicX()
@@ -69,6 +83,9 @@ def extract_junior_statistics(datasets: dict[str, list[pathlib.Path]], output_di
 
             this_operator_details: dict[str, tuple[str, str, dict]] = dict()
             this_operator_occurence: dict[str, int] = dict()
+            this_edge_details: dict[str, tuple[str, str, str, str]] = dict()
+            this_edge_occurence: dict[str, int] = dict()
+            # Node Details & Occurence
             for operator_node_index in logicx.node_indices('operator'):
                 node_features = logicx.node_features(operator_node_index)
                 uuid = node_features['node_uuid']
@@ -79,15 +96,42 @@ def extract_junior_statistics(datasets: dict[str, list[pathlib.Path]], output_di
                     this_operator_details[uuid] = (node_features['node_tuid'], node_features['node_type'], node_features.get('node_attr', {}))
                 this_operator_occurence[uuid] = this_operator_occurence.get(uuid, 0) + 1
 
+            # Edge Details & Occurence
+            for src_index, dst_index in logicx.edge_indices():
+                src_uuid = logicx.dag.nodes[src_index]['node_uuid']
+                dst_uuid = logicx.dag.nodes[dst_index]['node_uuid']
+                edge_key = f'{src_uuid}->{dst_uuid}'
+                src_node_features = logicx.node_features(src_index)
+                dst_node_features = logicx.node_features(dst_index)
+
+                if edge_key not in edge_details:
+                    src_tuid = src_node_features['node_tuid']
+                    src_type = src_node_features['node_type']
+                    dst_tuid = dst_node_features['node_tuid']
+                    dst_type = dst_node_features['node_type']
+                    edge_details[edge_key] = (src_tuid, src_type, dst_tuid, dst_type)
+
+                edge_occurence[edge_key] = edge_occurence.get(edge_key, 0) + 1
+
+                if edge_key not in this_edge_details:
+                    src_tuid = src_node_features['node_tuid']
+                    src_type = src_node_features['node_type']
+                    dst_tuid = dst_node_features['node_tuid']
+                    dst_type = dst_node_features['node_type']
+                    this_edge_details[edge_key] = (src_tuid, src_type, dst_tuid, dst_type)
+
+                this_edge_occurence[edge_key] = this_edge_occurence.get(edge_key, 0) + 1
+
             this_statistics = dict(
                 number_of_nodes = non,
                 number_of_edges = noe,
                 operator_details = get_object_with_sorted_dict(this_operator_details),
                 operator_occurence = get_object_with_sorted_dict(this_operator_occurence),
+                edge_details = get_object_with_sorted_dict(this_edge_details),
+                edge_occurence = get_object_with_sorted_dict(this_edge_occurence),
             )
             detailed_statistics[logicx_hash] = this_statistics
 
-        
         logicx_junior_statistics = dict(
             detail = detailed_statistics,
             overall = dict(
@@ -95,6 +139,8 @@ def extract_junior_statistics(datasets: dict[str, list[pathlib.Path]], output_di
                 ne_with_max_noe = ne_with_max_noe,
                 operator_details = get_object_with_sorted_dict(operator_details),
                 operator_occurence = get_object_with_sorted_dict(operator_occurence),
+                edge_details = get_object_with_sorted_dict(edge_details),
+                edge_occurence = get_object_with_sorted_dict(edge_occurence),
             )
         )
 
@@ -167,7 +213,8 @@ def extract_motif_statistics(datasets: dict[str, list[pathlib.Path]], output_dir
         }
 
     # For Space Efficiency: Scan 2 Rounds.
-    candidate_motif_hashes = set()
+    candidate_top_ks = [50, 100, 150, 200] # This can be modified in future for different top-K motif selection. Here we just use fixed values.
+    candidate_motif_hashes = {k: set() for k in candidate_top_ks}
     top_k = 200
     radii = [1,2]
 
@@ -235,8 +282,7 @@ def extract_motif_statistics(datasets: dict[str, list[pathlib.Path]], output_dir
     save_json(candidate_motif_hashes, output_dirpath.joinpath(f'logicx_candidate_motif_hashes.json'), indent=2)
 
 
-def extract_edit_distances(datasets: dict[str, list[pathlib.Path]], output_dirpath: pathlib.Path):
-    sample_number = 100
+def extract_edit_distances(datasets: dict[str, list[pathlib.Path]], output_dirpath: pathlib.Path, sample_number: int | None):
     datasets = {
         dataset_name: random.sample(logicx_filepaths, min(sample_number, len(logicx_filepaths)))
         for dataset_name, logicx_filepaths in datasets.items()
@@ -278,8 +324,8 @@ def main(input_names, input_dirpaths: list[pathlib.Path], output_dirpath: pathli
 
     if mode== 'motif':
         logger.info(f'... MOTIF Occurences ...')
-        extract_motif_statistics(datasets, output_dirpath)
+        extract_motif_statistics(datasets, output_dirpath, sample_number, worker_number)
 
     if mode== 'edit':
         logger.info(f'... Edit Distances ...')
-        extract_edit_distances(datasets, output_dirpath)
+        extract_edit_distances(datasets, output_dirpath, sample_number)
