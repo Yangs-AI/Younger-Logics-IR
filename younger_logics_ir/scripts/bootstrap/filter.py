@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2025-12-25 21:55:09
+# Last Modified time: 2026-01-21 02:40:31
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -14,12 +14,14 @@
 ########################################################################
 
 
+import os
 import tqdm
 import pathlib
 import networkx
 import multiprocessing
 
 from younger.commons.io import create_dir, save_json
+from younger.commons.utils import split_sequence
 
 from younger_logics_ir.modules import Instance, LogicX, Origin
 from younger_logics_ir.commons.logging import logger
@@ -30,18 +32,23 @@ def get_opset_version(opset_import: dict[str, int]) -> int | None:
     return opset_version
 
 
-def check_instance(parameter: tuple[pathlib.Path, int]) -> pathlib.Path | None:
-    path, opset_version = parameter
-    instance = Instance()
-    try:
-        instance.load(path)
+def check_instances(parameter: tuple[list[pathlib.Path], int, int]) -> list[pathlib.Path]:
+    instance_dirpaths_chunk, opset_version, worker_index = parameter
+    initial_filtered: list[pathlib.Path] = list()
+    with tqdm.tqdm(total=len(instance_dirpaths_chunk), desc=f'Processing: Worker PID - {os.getpid()} | Initial Filter - For OPSET={"ALL" if opset_version is None else opset_version}', position=worker_index) as progress_bar:
+        for instance_dirpath in instance_dirpaths_chunk:
+            instance = Instance()
+            try:
+                instance.load(instance_dirpath)
 
-        if opset_version is not None and opset_version != get_opset_version(instance.logicx.dag.graph['opset_import']):
-            return None
-        else:
-            return path
-    except:
-        return None
+                if opset_version is not None and opset_version != get_opset_version(instance.logicx.dag.graph['opset_import']):
+                    continue
+                else:
+                    initial_filtered.append(instance_dirpath)
+            except:
+                logger.warning(f'Instance Load Failed: {instance_dirpath}')
+            progress_bar.update(1)
+    return initial_filtered
 
 
 def filter_instance(instance_dirpath: pathlib.Path, standard_dirpath: pathlib.Path, skeleton_dirpath: pathlib.Path) -> tuple[Origin, int, bool, bool, str, networkx.DiGraph]:
@@ -86,34 +93,33 @@ def main(input_dirpaths: list[pathlib.Path], output_dirpath: pathlib.Path, opset
     else:
         logger.info(f'Filter All. ONNX OPSET Version Not Specified.')
 
-    check_parameters = list()
+    instance_dirpaths = list()
     for input_dirpath in input_dirpaths:
         logger.info(f'Scanning Instances Directory Path: {input_dirpath}')
         for instance_dirpath in input_dirpath.iterdir():
-            check_parameters.append((instance_dirpath, opset_version))
+            instance_dirpaths.append(instance_dirpath)
 
     standard_dirpath = output_dirpath.joinpath('standard')
     skeleton_dirpath = output_dirpath.joinpath('skeleton')
     create_dir(standard_dirpath)
     create_dir(skeleton_dirpath)
 
-    logger.info(f'Total Instances To Be Filtered: {len(check_parameters)}')
-    instance_dirpaths = list()
+    logger.info(f'Total Instances To Be Filtered: {len(instance_dirpaths)}')
+    instance_dirpath_chunks = split_sequence(instance_dirpaths, worker_number)
+    parameter_chunks = [(instance_dirpath_chunk, opset_version, worker_index) for instance_dirpath_chunk, worker_index in zip(instance_dirpath_chunks, range(worker_number))]
     with multiprocessing.Pool(worker_number) as pool:
-        with tqdm.tqdm(total=len(check_parameters), desc=f'Initial Filter - For OPSET={"ALL" if opset_version is None else opset_version}') as progress_bar:
-            for index, path in enumerate(pool.imap_unordered(check_instance, check_parameters), start=1):
-                if path is not None:
-                    instance_dirpaths.append(path)
-                progress_bar.update(1)
-    logger.info(f'Total Instances After Initial Opset Filter: {len(instance_dirpaths)}')
+        initial_filtered: list[pathlib.Path] = list()
+        for initial_filtered_chunk in pool.imap_unordered(check_instances, parameter_chunks):
+            initial_filtered.extend(initial_filtered_chunk)
+    logger.info(f'Total Instances After Initial Opset Filter: {len(initial_filtered)}')
 
-    logger.info(f'Total Instances To Be Simplified - Standardize & Skeletonize: {len(instance_dirpaths)}')
+    logger.info(f'Total Instances To Be Simplified - Standardize & Skeletonize: {len(initial_filtered)}')
     instance_count = 0
     standard_count = 0
     skeleton_count = 0
     pedigree: dict[str, networkx.DiGraph] = dict()
-    with tqdm.tqdm(total=len(instance_dirpaths), desc='Simplify - Standardize & Skeleonize') as progress_bar:
-        for index, instance_dirpath in enumerate(instance_dirpaths, start=1):
+    with tqdm.tqdm(total=len(initial_filtered), desc='Simplify - Standardize & Skeleonize') as progress_bar:
+        for index, instance_dirpath in enumerate(initial_filtered, start=1):
             origin, lgx_count, std, skt, instance_unique, family = filter_instance(instance_dirpath, standard_dirpath, skeleton_dirpath)
             instance_count += lgx_count
             standard_count += std
