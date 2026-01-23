@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2026-01-19 10:04:04
+# Last Modified time: 2026-01-23 22:26:12
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -17,6 +17,7 @@
 import copy
 import pathlib
 import networkx
+import warnings
 
 from typing import Literal, Generator
 
@@ -335,7 +336,9 @@ class LogicX(object):
         :return: _description_
         :rtype: str
         """
-        return networkx.weisfeiler_lehman_graph_hash(logicx.dag, edge_attr=None, node_attr='node_uuid', iterations=3, digest_size=16)
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', message='.*hashes produced for directed graphs changed.*', category=UserWarning, module=r'networkx(\..*)?$')
+            return networkx.weisfeiler_lehman_graph_hash(logicx.dag, edge_attr=None, node_attr='node_uuid', iterations=3, digest_size=16)
 
     @classmethod
     def luid(cls, logicx: 'LogicX') -> str:
