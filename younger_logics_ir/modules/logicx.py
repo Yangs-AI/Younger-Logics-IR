@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2026-01-23 22:26:12
+# Last Modified time: 2026-01-24 08:01:15
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -333,7 +333,7 @@ class LogicX(object):
         :param logicx: _description_
         :type logicx: LogicX
 
-        :return: _description_
+        :return: The weisfeiler-lehman hash will be generated for the DAG property of the LogicX.
         :rtype: str
         """
         with warnings.catch_warnings():
