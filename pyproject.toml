@@ -53,6 +53,7 @@ tools-vs = ["graphviz"]
 tools = ["graphviz"]
 
 develop = [
+    "pytest",
     "sphinx",
     "python-semantic-release"
 ]
