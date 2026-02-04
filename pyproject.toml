@@ -11,7 +11,7 @@ name = "Younger-Logics-IR"
 description = "Provides a Unified Intermediate Representation For Neural Networks, Enabling Framework-Agnostic Analysis, Conversion, and Optimization."
 version = "0.0.1a1"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = {text = "Apache Software License"}
 keywords = ["Younger", "Logic", "Deep Learning", "DAG", "Intermediate Representation"]
 authors = [{name = "Jason-Young-AI", email = "AI.Jason.Young@outlook.com"}]
