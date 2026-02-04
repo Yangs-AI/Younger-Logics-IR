@@ -9,7 +9,7 @@ exclude = ["tests*", "third_parties*"]
 [project]
 name = "Younger-Logics-IR"
 description = "Provides a Unified Intermediate Representation For Neural Networks, Enabling Framework-Agnostic Analysis, Conversion, and Optimization."
-version = "0.0.1alpha1"
+version = "0.0.1a1"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "Apache Software License"}
@@ -38,8 +38,7 @@ dependencies = [
     "tqdm",
     "click",
     "younger",
-    "networkx",
-    "python-semantic-release"
+    "networkx"
 ]
 
 [project.optional-dependencies]
@@ -53,8 +52,9 @@ scripts-bootstrap = ["numpy", "pandas", "scipy", "scikit-learn", "umap", "seabor
 tools-vs = ["graphviz"]
 tools = ["graphviz"]
 
-developer = [
-    "sphinx"
+develop = [
+    "sphinx",
+    "python-semantic-release"
 ]
 
 [project.urls]
