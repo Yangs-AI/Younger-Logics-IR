@@ -15,6 +15,7 @@
 
 
 import os
+import re
 import onnx
 import tqdm
 import pathlib
@@ -39,25 +40,87 @@ from younger_logics_ir.scripts.commons.utils import get_onnx_opset_versions, get
 from .utils import get_huggingface_hub_model_readme, get_huggingface_hub_model_siblings, clean_huggingface_hub_model_cache, infer_supported_frameworks
 
 
+def _is_permanent_error(error_message: str) -> bool:
+    """Return True if the error is permanent -- no opset version change can fix it.
+
+    Matches by exception type name (everything before ': '). Exception types that
+    indicate model-loading / config / file-structure issues are permanent because
+    they happen before ONNX export uses the opset version.
+    """
+    _PERMANENT_TYPES = frozenset({
+        'FileNotFoundError',
+        'OSError',
+        'ValueError',
+        'ImportError',
+        'TypeError',
+    })
+    colon_pos = error_message.find(': ')
+    if colon_pos == -1:
+        return False
+    return error_message[:colon_pos] in _PERMANENT_TYPES
+
+
+def _get_minimum_opset_from_error(error_message: str) -> int | None:
+    """Extract the minimum opset version required by an UnsupportedOperatorError.
+
+    Returns None if the error message does not specify a target version.
+    """
+    # e.g. "Support for this operator was added in version 14"
+    match = re.search(
+        r'Support for this operator was added in version (\d+)',
+        error_message,
+    )
+    if match:
+        return int(match.group(1))
+    # e.g. "Please try opset version 11"
+    match = re.search(
+        r'please try opset version (\d+)',
+        error_message,
+        re.IGNORECASE,
+    )
+    if match:
+        return int(match.group(1))
+    return None
+
+
 def clean_cache(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path):
     delete_dir(cvt_cache_dirpath, only_clean=True)
     clean_huggingface_hub_model_cache(model_id, ofc_cache_dirpath)
 
 
 def safe_optimum_export(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path, onnx_opset_version: int, results_queue: multiprocessing.Queue, device: str):
+    import os
+
+    # Redirect stdout and stderr to /dev/null BEFORE importing optimum/torch,
+    # otherwise torch registration warnings leak to the parent terminal.
+    # All communication back to the parent process goes through the results_queue.
+    saved_fds = {1: os.dup(1), 2: os.dup(2)}
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(devnull, 1)
+    os.dup2(devnull, 2)
+    os.close(devnull)
+
     from optimum.exporters.onnx import main_export
 
     try:
         main_export(model_id, cvt_cache_dirpath, opset=onnx_opset_version, device=device, cache_dir=ofc_cache_dirpath, monolith=True, do_validation=False, trust_remote_code=True, no_post_process=True)
         this_status = 'success'
+        this_error = ''
     except MemoryError as exception:
         this_status = 'oversize'
+        this_error = str(exception)
     except utils.RepositoryNotFoundError as exception:
         this_status = 'access_deny'
+        this_error = str(exception)
     except Exception as exception:
         this_status = 'convert_error'
+        this_error = f'{type(exception).__name__}: {exception}'
+    finally:
+        for fd, saved in saved_fds.items():
+            os.dup2(saved, fd)
+            os.close(saved)
 
-    results_queue.put(this_status)
+    results_queue.put((this_status, this_error))
 
 
 def convert_optimum(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path, device: Literal['cpu', 'cuda'] = 'cpu') -> tuple[dict[int, tuple[Literal['success', 'oversize', 'access_deny', 'convert_error', 'system_kill'], dict[str, Literal['success', 'logicx_error']]]], list[Instance], list[str]]:
@@ -66,10 +129,10 @@ def convert_optimum(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_di
     instances: list[Instance] = list()
     artifacts: list[str] = list()
 
-    for onnx_opset_version in get_onnx_opset_versions():
-        # The highest opset version supported by torch.onnx.export is 20
-        if onnx_opset_version > 20:
-            continue
+    opset_versions = [v for v in get_onnx_opset_versions() if v <= 20]
+    opset_index = 0
+    while opset_index < len(opset_versions):
+        onnx_opset_version = opset_versions[opset_index]
         results_queue = multiprocessing.Queue()
         subprocess = multiprocessing.Process(target=safe_optimum_export, args=(model_id, cvt_cache_dirpath, ofc_cache_dirpath, onnx_opset_version, results_queue, device))
         subprocess.start()
@@ -78,8 +141,9 @@ def convert_optimum(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_di
         this_status_details: dict[str, Literal['success', 'logicx_error']] = dict()
         if results_queue.empty():
             this_status = 'system_kill'
+            this_error = 'subprocess exited without putting result (likely OOM)'
         else:
-            this_status = results_queue.get()
+            this_status, this_error = results_queue.get()
             if this_status == 'success':
                 for filepath in cvt_cache_dirpath.rglob('*.onnx'):
                     try:
@@ -90,7 +154,36 @@ def convert_optimum(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_di
                         this_status_details[str(filepath)] = 'success'
                     except Exception as exception:
                         this_status_details[str(filepath)] = 'logicx_error'
+
+        if this_status == 'convert_error':
+            # Permanent error -> skip remaining opsets entirely
+            if _is_permanent_error(this_error):
+                logger.warning(f'[opset {onnx_opset_version}] {this_status}: {this_error}')
+                status[onnx_opset_version] = (this_status, this_status_details)
+                break
+
+            # Unsupported operator with known minimum version -> jump there
+            target_opset = _get_minimum_opset_from_error(this_error)
+            if target_opset is not None and target_opset > onnx_opset_version:
+                logger.warning(f'[opset {onnx_opset_version}] {this_status}: {this_error}')
+                status[onnx_opset_version] = (this_status, this_status_details)
+                # Find the opset >= target
+                for i in range(opset_index + 1, len(opset_versions)):
+                    if opset_versions[i] >= target_opset:
+                        opset_index = i
+                        break
+                else:
+                    # target_opset beyond our range -> exit
+                    break
+                continue
+
+        # Log and record status
+        if this_status == 'success':
+            logger.info(f'[opset {onnx_opset_version}] {this_status}: {len(this_status_details)} artifacts created')
+        elif this_error:
+            logger.warning(f'[opset {onnx_opset_version}] {this_status}: {this_error}')
         status[onnx_opset_version] = (this_status, this_status_details)
+        opset_index += 1
 
     clean_cache(model_id, cvt_cache_dirpath, ofc_cache_dirpath)
     return status, instances, artifacts
@@ -314,7 +407,8 @@ def get_model_infos_and_convert_method(model_infos_filepath: pathlib.Path, frame
     model_infos: list[dict[str, Any]] = list()
     for model_info in load_json(model_infos_filepath):
         model_frameworks = get_model_frameworks(infer_supported_frameworks(model_info))
-        if framework in model_frameworks and model_size_limit[0] <= model_info['usedStorage'] and model_info['usedStorage'] <= model_size_limit[1]:
+        used_storage = model_info.get('usedStorage', 0)
+        if framework in model_frameworks and model_size_limit[0] <= used_storage and used_storage <= model_size_limit[1]:
             model_infos.append(model_info)
 
     convert_method = supported_convert_methods[framework]
@@ -448,7 +542,7 @@ def main(
             status, instances, artifacts = convert_method(model_id, cvt_cache_dirpath, ofc_cache_dirpath, device)
 
             model_owner, model_name = model_id.split('/')
-            for index, instance, artifact in enumerate(zip(instances, artifacts), start=1):
+            for index, (instance, artifact) in enumerate(zip(instances, artifacts), start=1):
                 instance.insert_label(
                     Implementation(
                         origin=Origin(YLIROriginHub.HUGGINGFACE, model_owner, model_name, artifact),

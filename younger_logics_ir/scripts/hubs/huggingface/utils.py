@@ -26,7 +26,7 @@ from typing import Any, Literal, Generator
 from huggingface_hub import utils, HfFileSystem, get_hf_file_metadata, hf_hub_url, scan_cache_dir
 from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE
 
-from younger.commons.io import save_json, delete_dir, get_human_readable_size_representation
+from younger.commons.io import load_json, save_json, save_pickle, load_pickle, delete_dir, get_human_readable_size_representation
 from younger.commons.cache import CachedChunks
 from younger.commons.string import extract_possible_digits_from_readme_string, extract_possible_tables_from_readme_string, split_front_matter_from_readme_string, README_DATE_Pattern, README_DATETIME_Pattern, README_TABLE_Pattern
 
@@ -91,10 +91,81 @@ def _extract_rate_limit_reset_time(headers: dict) -> float | None:
     return None
 
 
+def _http_request_with_retry(
+    session: requests.Session,
+    method: str,
+    url: str,
+    max_retries: int = 3,
+    **kwargs,
+) -> requests.Response | None:
+    """
+    HTTP request with timeout and retry on transient errors.
+
+    Retries on: Timeout, ConnectionError (up to max_retries times).
+    On HTTP 429: parses RateLimit header, waits, then retries once.
+    All other errors return None immediately.
+
+    :param session: requests Session to use
+    :param method: HTTP method (GET, POST, etc.)
+    :param url: Request URL
+    :param max_retries: Maximum number of retries for Timeout/ConnectionError (default 3)
+    :param kwargs: Passed through to session.request()
+    :return: Response object or None on failure
+    """
+    kwargs.setdefault('timeout', 30)
+    last_exception = None
+    for attempt in range(max_retries + 1):
+        try:
+            _apply_rate_limit()
+            response = session.request(method, url, **kwargs)
+            utils.hf_raise_for_status(response)
+            return response
+        except requests.exceptions.Timeout as e:
+            last_exception = e
+            logger.warning(f"HTTP timeout for '{url}' (attempt {attempt+1}/{max_retries+1}): {e}")
+        except requests.exceptions.ConnectionError as e:
+            last_exception = e
+            logger.warning(f"HTTP connection error for '{url}' (attempt {attempt+1}/{max_retries+1}): {e}")
+        except requests.exceptions.HTTPError as e:
+            status = e.response.status_code
+            if status == 429:
+                reset_time = _extract_rate_limit_reset_time(e.response.headers)
+                if reset_time is not None and reset_time > 0:
+                    logger.warning(f"HTTP 429 for '{url}', waiting {reset_time:.1f}s as per RateLimit header...")
+                    time.sleep(reset_time)
+                    # Single retry after waiting
+                    try:
+                        response = session.request(method, url, **kwargs)
+                        utils.hf_raise_for_status(response)
+                        return response
+                    except Exception as retry_e:
+                        logger.error(f"HTTP 429 retry failed for '{url}': {retry_e}")
+                        return None
+                else:
+                    logger.warning(f"HTTP 429 for '{url}' but no valid RateLimit header. Aborting.")
+                    time.sleep(300) # usually a time reset takes 5 min. just in case we hit the worst situation.
+                    return None
+            else:
+                logger.error(f"HTTP {status} for '{url}': {e}")
+                return None
+        except utils.HfHubHTTPError as e:
+            logger.error(f"HF Hub error for '{url}': {e.request_id} - {e.server_message}")
+            return None
+        if attempt < max_retries:
+            wait = 2 ** attempt
+            logger.info(f"Retrying '{url}' in {wait:.1f}s...")
+            time.sleep(wait)
+    logger.error(f"All {max_retries+1} attempts failed for '{url}': {last_exception}")
+    return None
+
+
 def get_one_data_from_huggingface_hub_api(path: str, params: dict | None = None, token: str | None = None) -> Any:
     """
-    Fetch single data from Hugging Face API with rate limiting.
-    On 429, parses RateLimit header and retries once after waiting.
+    Fetch single data from Hugging Face API with rate limiting and timeout.
+
+    On transient errors (timeout, connection error), retries up to 3 times.
+    On HTTP 429, parses RateLimit header, waits, then retries once.
+    On permanent errors (404, 401, etc.), returns None immediately.
 
     :param path: API endpoint
     :param params: Query parameters
@@ -108,43 +179,19 @@ def get_one_data_from_huggingface_hub_api(path: str, params: dict | None = None,
     session = requests.Session()
     headers = utils.build_hf_headers(token=token)
 
-    # First attempt
-    _apply_rate_limit()
-    response = session.get(path, params=params, headers=headers)
-    try:
-        utils.hf_raise_for_status(response)
-        return response.json()
-    except requests.exceptions.HTTPError as e:
-        status = response.status_code
-        if status == 429:
-            # Parse RateLimit header (official HF SDK approach)
-            reset_time = _extract_rate_limit_reset_time(response.headers)
-            if reset_time is not None and reset_time > 0:
-                logger.warning(f"HF API 429 (rate limited). Waiting {reset_time:.1f}s as per RateLimit header...")
-                time.sleep(reset_time)
-                # Single retry after waiting
-                response = session.get(path, params=params, headers=headers)
-                try:
-                    utils.hf_raise_for_status(response)
-                    return response.json()
-                except Exception as retry_e:
-                    logger.error(f"HF API retry after 429 failed: {retry_e}")
-                    return None
-            else:
-                logger.warning(f"HF API 429 but no valid RateLimit header. Aborting.")
-                return None
-        else:
-            logger.error(f"HF API request failed for '{path}' with status {status}: {e}")
-            return None
-    except utils.HfHubHTTPError as e:
-        logger.error(f'Request: {path} {e.request_id} - {e.server_message}')
+    response = _http_request_with_retry(session, 'GET', path, params=params, headers=headers, timeout=30)
+    if response is None:
         return None
+    return response.json()
 
 
 def get_all_data_from_huggingface_hub_api(path: str, params: dict | None = None, token: str | None = None) -> Generator[Any, None, None]:
     """
-    Paginate through Hugging Face API with rate limiting to stay within configured req/5min quota.
-    On 429, parses RateLimit header and retries once after waiting.
+    Paginate through Hugging Face API with rate limiting and timeout.
+
+    On transient errors (timeout, connection error), retries up to 3 times
+    per page request. On HTTP 429, parses RateLimit header, waits, then retries once.
+    On permanent errors, stops pagination.
 
     :param path: API endpoint path
     :param params: Query parameters
@@ -159,82 +206,20 @@ def get_all_data_from_huggingface_hub_api(path: str, params: dict | None = None,
     headers = utils.build_hf_headers(token=token)
 
     # First page
-    _apply_rate_limit()
-    response = session.get(path, params=params, headers=headers)
-    try:
-        utils.hf_raise_for_status(response)
-        yield from response.json()
-        next_page_path = response.links.get("next", {}).get("url")
-    except requests.exceptions.HTTPError as e:
-        status = response.status_code
-        if status == 429:
-            # Parse RateLimit header (official HF SDK approach)
-            reset_time = _extract_rate_limit_reset_time(response.headers)
-            if reset_time is not None and reset_time > 0:
-                logger.warning(f"HF API 429 on first page. Waiting {reset_time:.1f}s as per RateLimit header...")
-                time.sleep(reset_time)
-                # Single retry after waiting
-                response = session.get(path, params=params, headers=headers)
-                try:
-                    utils.hf_raise_for_status(response)
-                    yield from response.json()
-                    next_page_path = response.links.get("next", {}).get("url")
-                except Exception as retry_e:
-                    logger.error(f"HF API retry after 429 failed: {retry_e}")
-                    yield from ()
-                    next_page_path = None
-            else:
-                logger.warning(f"HF API 429 but no valid RateLimit header. Aborting pagination.")
-                yield from ()
-                next_page_path = None
-        else:
-            logger.error(f"HF API request failed for '{path}' with status {status}: {e}")
-            yield from ()
-            next_page_path = None
-    except utils.HfHubHTTPError as e:
-        logger.error(f'Request failed: {e.request_id} - {e.server_message}')
-        yield from ()
-        next_page_path = None
+    response = _http_request_with_retry(session, 'GET', path, params=params, headers=headers, timeout=30)
+    if response is None:
+        return
+    yield from response.json()
+    next_page_path = response.links.get("next", {}).get("url")
 
     # Follow pages
     while next_page_path is not None:
-        _apply_rate_limit()
         logger.debug(f"Pagination: fetching next page")
-        response = session.get(next_page_path, headers=headers)
-        try:
-            utils.hf_raise_for_status(response)
-            yield from response.json()
-            next_page_path = response.links.get("next", {}).get("url")
-        except requests.exceptions.HTTPError as e:
-            status = response.status_code
-            if status == 429:
-                # Parse RateLimit header (official HF SDK approach)
-                reset_time = _extract_rate_limit_reset_time(response.headers)
-                if reset_time is not None and reset_time > 0:
-                    logger.warning(f"HF API 429 on next page. Waiting {reset_time:.1f}s as per RateLimit header...")
-                    time.sleep(reset_time)
-                    # Single retry after waiting
-                    response = session.get(next_page_path, headers=headers)
-                    try:
-                        utils.hf_raise_for_status(response)
-                        yield from response.json()
-                        next_page_path = response.links.get("next", {}).get("url")
-                    except Exception as retry_e:
-                        logger.error(f"HF API retry after 429 failed: {retry_e}")
-                        yield from ()
-                        next_page_path = None
-                else:
-                    logger.warning(f"HF API 429 on next page but no valid RateLimit header. Aborting pagination.")
-                    yield from ()
-                    next_page_path = None
-            else:
-                logger.error(f"HF API pagination request failed with status {status}: {e}")
-                yield from ()
-                next_page_path = None
-        except utils.HfHubHTTPError as e:
-            logger.error(f'Pagination request failed: {e.request_id} - {e.server_message}')
-            yield from ()
-            next_page_path = None
+        response = _http_request_with_retry(session, 'GET', next_page_path, headers=headers, timeout=30)
+        if response is None:
+            return
+        yield from response.json()
+        next_page_path = response.links.get("next", {}).get("url")
 
 
 #############################################################################################################
@@ -248,6 +233,38 @@ def get_huggingface_hub_model_ids(token: str | None = None) -> Generator[dict, N
     # Returns full model objects (id, lastModified, etc.) to preserve metadata without extra API calls
     models = get_all_data_from_huggingface_hub_api(models_path, params=dict(sort='lastModified', direction=-1), token=token)
     return models
+
+
+def _is_chunk_completed(filepath: pathlib.Path) -> bool:
+    """Check if a saved JSON file already contains usedStorage data by peeking at the header."""
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            # Read first 2KB — the first model's 'usedStorage' key should be within this range
+            head = f.read(2048)
+            return '"usedStorage"' in head
+    except Exception:
+        return False
+
+
+def _find_resume_chunk_id(save_dirpath: pathlib.Path, num_of_chunks: int) -> int | None:
+    """
+    Scan output files to find the first chunk that has not been completed with storage data.
+
+    Returns the CachedChunks current_index to resume from, or None if all chunks are complete.
+    """
+    completed_max = 0  # highest chunk_id (file number) confirmed complete
+    for filepath in save_dirpath.glob('huggingface_hub_model_infos_*.json'):
+        if _is_chunk_completed(filepath):
+            m = re.match(r'huggingface_hub_model_infos_(\d+)\.json', filepath.name)
+            if m:
+                chunk_id = int(m.group(1))
+                if chunk_id > completed_max:
+                    completed_max = chunk_id
+    if completed_max >= num_of_chunks:
+        return None  # All complete
+    # chunk_id (file number) = CachedChunks._current_index after __next__ increment
+    # To re-process the first incomplete chunk, set _current_index to the last completed
+    return completed_max
 
 
 def get_huggingface_hub_model_infos(save_dirpath: pathlib.Path, token: str | None = None, number_per_file: int | None = None, worker_number: int | None = None, include_storage: bool = False):
@@ -269,8 +286,29 @@ def get_huggingface_hub_model_infos(save_dirpath: pathlib.Path, token: str | Non
     else:
         logger.info(f' v Retrieving All Model Infos (Storage excluded) ...')
 
+    # Resume support for storage retrieval: rewind to first incomplete chunk
+    if include_storage:
+        resume_index = _find_resume_chunk_id(save_dirpath, chunks_of_simple_model_infos._num_of_chunks)
+        if resume_index is None:
+            logger.info(f' All chunks already completed with storage data. Nothing to do.')
+            logger.info(f' ^ Retrieved.')
+            return
+        if resume_index < chunks_of_simple_model_infos._current_index:
+            logger.info(f' Resuming from chunk {resume_index} (files _1~_{resume_index} already have storage data)')
+            # Update both the status file (for future restarts) and the in-memory state
+            save_pickle(resume_index, simple_model_infos_cache_dirpath.joinpath(CachedChunks._status_cache_filename_))
+            chunks_of_simple_model_infos._current_index = resume_index
+
     with tqdm.tqdm(initial=chunks_of_simple_model_infos.current_position, total=len(chunks_of_simple_model_infos), desc='Retrieve Model') as progress_bar:
         for chunk_of_simple_model_infos in chunks_of_simple_model_infos:
+            save_filepath = save_dirpath.joinpath(f'huggingface_hub_model_infos_{chunks_of_simple_model_infos.current_chunk_id}.json')
+
+            # Resume: skip chunks whose output files already contain storage data
+            if include_storage and save_filepath.is_file() and _is_chunk_completed(save_filepath):
+                logger.info(f'Skipping already completed chunk → {save_filepath.name}')
+                progress_bar.update(len(chunk_of_simple_model_infos))
+                continue
+
             model_infos_per_file = list()
 
             if include_storage:
@@ -304,7 +342,6 @@ def get_huggingface_hub_model_infos(save_dirpath: pathlib.Path, token: str | Non
                     model_infos_per_file.append(simple_model_info)
                     progress_bar.update(1)
 
-            save_filepath = save_dirpath.joinpath(f'huggingface_hub_model_infos_{chunks_of_simple_model_infos.current_chunk_id}.json')
             save_json(model_infos_per_file, save_filepath, indent=2)
             logger.info(f'Total {len(model_infos_per_file)} Model Info Items Saved In: \'{save_filepath}\'.')
 
