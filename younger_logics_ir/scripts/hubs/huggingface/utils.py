@@ -91,6 +91,49 @@ def _extract_rate_limit_reset_time(headers: dict) -> float | None:
     return None
 
 
+def is_permanent_error(error_message: str) -> bool:
+    """Return True if the error is permanent -- no opset version change can fix it.
+
+    Matches by exception type name (everything before ': '). Exception types that
+    indicate model-loading / config / file-structure issues are permanent because
+    they happen before ONNX export uses the opset version.
+    """
+    _PERMANENT_TYPES = frozenset({
+        'FileNotFoundError',
+        'OSError',
+        'ValueError',
+        'ImportError',
+        'TypeError',
+    })
+    colon_pos = error_message.find(': ')
+    if colon_pos == -1:
+        return False
+    return error_message[:colon_pos] in _PERMANENT_TYPES
+
+
+def get_minimum_opset_from_error(error_message: str) -> int | None:
+    """Extract the minimum opset version required by an UnsupportedOperatorError.
+
+    Returns None if the error message does not specify a target version.
+    """
+    # e.g. "Support for this operator was added in version 14"
+    match = re.search(
+        r'Support for this operator was added in version (\d+)',
+        error_message,
+    )
+    if match:
+        return int(match.group(1))
+    # e.g. "Please try opset version 11"
+    match = re.search(
+        r'please try opset version (\d+)',
+        error_message,
+        re.IGNORECASE,
+    )
+    if match:
+        return int(match.group(1))
+    return None
+
+
 def _http_request_with_retry(
     session: requests.Session,
     method: str,
@@ -248,23 +291,23 @@ def _is_chunk_completed(filepath: pathlib.Path) -> bool:
 
 def _find_resume_chunk_id(save_dirpath: pathlib.Path, num_of_chunks: int) -> int | None:
     """
-    Scan output files to find the first chunk that has not been completed with storage data.
+    Find the first chunk whose output file is missing or incomplete.
 
-    Returns the CachedChunks current_index to resume from, or None if all chunks are complete.
+    Scans output files sequentially from file number 1 upward.
+    Output files follow 1-based naming: file _{N}.json holds data
+    from CachedChunks chunk N-1 (0-based).
+
+    Returns the 0-based CachedChunks index of the first incomplete chunk,
+    or None if all chunks have complete output files.
     """
-    completed_max = 0  # highest chunk_id (file number) confirmed complete
-    for filepath in save_dirpath.glob('huggingface_hub_model_infos_*.json'):
-        if _is_chunk_completed(filepath):
-            m = re.match(r'huggingface_hub_model_infos_(\d+)\.json', filepath.name)
-            if m:
-                chunk_id = int(m.group(1))
-                if chunk_id > completed_max:
-                    completed_max = chunk_id
-    if completed_max >= num_of_chunks:
-        return None  # All complete
-    # chunk_id (file number) = CachedChunks._current_index after __next__ increment
-    # To re-process the first incomplete chunk, set _current_index to the last completed
-    return completed_max
+    for chunk_index in range(num_of_chunks):
+        file_number = chunk_index + 1
+        filepath = save_dirpath.joinpath(
+            f'huggingface_hub_model_infos_{file_number}.json'
+        )
+        if not (filepath.is_file() and _is_chunk_completed(filepath)):
+            return chunk_index
+    return None
 
 
 def get_huggingface_hub_model_infos(save_dirpath: pathlib.Path, token: str | None = None, number_per_file: int | None = None, worker_number: int | None = None, include_storage: bool = False):

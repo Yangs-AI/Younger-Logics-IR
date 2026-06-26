@@ -15,7 +15,6 @@
 
 
 import os
-import re
 import onnx
 import tqdm
 import pathlib
@@ -37,50 +36,8 @@ from younger_logics_ir.commons.constants import YLIROriginHub
 
 from younger_logics_ir.scripts.commons.utils import get_onnx_opset_versions, get_onnx_model_opset_version
 
-from .utils import get_huggingface_hub_model_readme, get_huggingface_hub_model_siblings, clean_huggingface_hub_model_cache, infer_supported_frameworks
+from .utils import get_huggingface_hub_model_readme, get_huggingface_hub_model_siblings, clean_huggingface_hub_model_cache, infer_supported_frameworks, is_permanent_error, get_minimum_opset_from_error
 
-
-def _is_permanent_error(error_message: str) -> bool:
-    """Return True if the error is permanent -- no opset version change can fix it.
-
-    Matches by exception type name (everything before ': '). Exception types that
-    indicate model-loading / config / file-structure issues are permanent because
-    they happen before ONNX export uses the opset version.
-    """
-    _PERMANENT_TYPES = frozenset({
-        'FileNotFoundError',
-        'OSError',
-        'ValueError',
-        'ImportError',
-        'TypeError',
-    })
-    colon_pos = error_message.find(': ')
-    if colon_pos == -1:
-        return False
-    return error_message[:colon_pos] in _PERMANENT_TYPES
-
-
-def _get_minimum_opset_from_error(error_message: str) -> int | None:
-    """Extract the minimum opset version required by an UnsupportedOperatorError.
-
-    Returns None if the error message does not specify a target version.
-    """
-    # e.g. "Support for this operator was added in version 14"
-    match = re.search(
-        r'Support for this operator was added in version (\d+)',
-        error_message,
-    )
-    if match:
-        return int(match.group(1))
-    # e.g. "Please try opset version 11"
-    match = re.search(
-        r'please try opset version (\d+)',
-        error_message,
-        re.IGNORECASE,
-    )
-    if match:
-        return int(match.group(1))
-    return None
 
 
 def clean_cache(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path):
@@ -100,9 +57,9 @@ def safe_optimum_export(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cach
     os.dup2(devnull, 2)
     os.close(devnull)
 
-    from optimum.exporters.onnx import main_export
-
     try:
+        from optimum.exporters.onnx import main_export
+
         main_export(model_id, cvt_cache_dirpath, opset=onnx_opset_version, device=device, cache_dir=ofc_cache_dirpath, monolith=True, do_validation=False, trust_remote_code=True, no_post_process=True)
         this_status = 'success'
         this_error = ''
@@ -157,13 +114,13 @@ def convert_optimum(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_di
 
         if this_status == 'convert_error':
             # Permanent error -> skip remaining opsets entirely
-            if _is_permanent_error(this_error):
+            if is_permanent_error(this_error):
                 logger.warning(f'[opset {onnx_opset_version}] {this_status}: {this_error}')
                 status[onnx_opset_version] = (this_status, this_status_details)
                 break
 
             # Unsupported operator with known minimum version -> jump there
-            target_opset = _get_minimum_opset_from_error(this_error)
+            target_opset = get_minimum_opset_from_error(this_error)
             if target_opset is not None and target_opset > onnx_opset_version:
                 logger.warning(f'[opset {onnx_opset_version}] {this_status}: {this_error}')
                 status[onnx_opset_version] = (this_status, this_status_details)
