@@ -264,7 +264,7 @@ class Implementation(object):
         return hash(self.origin)
 
     def __str__(self):
-        return f'Implementation - <Origin/Like/Download/#Performances>: <{self.origin}/{self.like}/{self.download}/{len(self.count_performances())}>'
+        return f'Implementation - <Origin/Like/Download/#Performances>: <{self.origin}/{self.like}/{self.download}/{self.count_performances(None, None)}>'
 
     def __eq__(self, other: 'Implementation') -> bool:
         return self.origin == other.origin

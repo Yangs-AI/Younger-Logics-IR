@@ -462,7 +462,7 @@ def main(
 
     # READMES
     readmes_dirpath = save_dirpath.joinpath(f'READMES')
-    create_dir(instances_dirpath)
+    create_dir(readmes_dirpath)
 
     # Official
     ofc_cache_dirpath = cache_dirpath.joinpath(f'Cache-HFOfc')
