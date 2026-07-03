@@ -396,10 +396,8 @@ class Implementation(object):
         return self._performances.get(benchmark, dict()).get(evaluation, None)
 
     def insert_performance(self, benchmark: Benchmark, evaluation: Evaluation, performance: Any) -> None:
-        evaluation2performance = self._performances.get(benchmark, dict())
-        if evaluation in evaluation2performance:
-            pass
-        else:
+        evaluation2performance = self._performances.setdefault(benchmark, dict())
+        if evaluation not in evaluation2performance:
             evaluation2performance[evaluation] = performance
 
     def update_performance(self, benchmark: Benchmark, evaluation: Evaluation, performance: Any) -> None:
