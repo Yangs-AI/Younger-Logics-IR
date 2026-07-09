@@ -51,11 +51,12 @@ def safe_optimum_export(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cach
     # Redirect stdout and stderr to /dev/null BEFORE importing optimum/torch,
     # otherwise torch registration warnings leak to the parent terminal.
     # All communication back to the parent process goes through the results_queue.
-    saved_fds = {1: os.dup(1), 2: os.dup(2)}
-    devnull = os.open(os.devnull, os.O_WRONLY)
-    os.dup2(devnull, 1)
-    os.dup2(devnull, 2)
-    os.close(devnull)
+    
+    # saved_fds = {1: os.dup(1), 2: os.dup(2)}
+    # devnull = os.open(os.devnull, os.O_WRONLY)
+    # os.dup2(devnull, 1)
+    # os.dup2(devnull, 2)
+    # os.close(devnull)
 
     saved_fds = {}
 
