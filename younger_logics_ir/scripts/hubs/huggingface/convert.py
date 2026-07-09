@@ -57,27 +57,55 @@ def safe_optimum_export(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cach
     os.dup2(devnull, 2)
     os.close(devnull)
 
-    try:
-        from optimum.exporters.onnx import main_export
+    saved_fds = {}
 
-        main_export(model_id, cvt_cache_dirpath, opset=onnx_opset_version, device=device, cache_dir=ofc_cache_dirpath, monolith=True, do_validation=False, trust_remote_code=True, no_post_process=True)
-        this_status = 'success'
-        this_error = ''
-    except MemoryError as exception:
-        this_status = 'oversize'
-        this_error = str(exception)
-    except utils.RepositoryNotFoundError as exception:
-        this_status = 'access_deny'
-        this_error = str(exception)
+    try:
+        saved_fds = {1: os.dup(1), 2: os.dup(2)}
+        devnull = os.open(os.devnull, os.O_WRONLY)
+
+        try:
+            os.dup2(devnull, 1)
+            os.dup2(devnull, 2)
+        finally:
+            os.close(devnull)
+
+        try:
+            from optimum.exporters.onnx import main_export
+    
+            main_export(model_id, cvt_cache_dirpath, opset=onnx_opset_version, device=device, cache_dir=ofc_cache_dirpath, monolith=True, do_validation=False, trust_remote_code=True, no_post_process=True)
+            this_status = 'success'
+            this_error = ''
+        except MemoryError as exception:
+            this_status = 'oversize'
+            this_error = str(exception)
+        except utils.RepositoryNotFoundError as exception:
+            this_status = 'access_deny'
+            this_error = str(exception)
+        except Exception as exception:
+            error_text = f"{type(exception).__name__}: {exception}"
+
+            if (
+                type(exception).__name__ == "OutOfMemoryError"
+                or "CUDA out of memory" in err_text
+                or "out of memory" in error_text.lower()
+            ):
+                this_status = "oversize"
+            else:
+                this_status = "convert_error"
+
+            this_error = error_text
     except Exception as exception:
-        this_status = 'convert_error'
-        this_error = f'{type(exception).__name__}: {exception}'
+        this_status = "covert_worker_error"
+        this_error = f"{type(exception).__name__}: {exception}"
+
     finally:
         for fd, saved in saved_fds.items():
-            os.dup2(saved, fd)
-            os.close(saved)
+            try:
+                os.dup2(saved, fd)
+            finally:
+                os.close(saved)
 
-    results_queue.put((this_status, this_error))
+        results_queue.put((this_status, this_error))
 
 
 def convert_optimum(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path, device: Literal['cpu', 'cuda'] = 'cpu') -> tuple[dict[int, tuple[Literal['success', 'oversize', 'access_deny', 'convert_error', 'system_kill'], dict[str, Literal['success', 'logicx_error']]]], list[Instance], list[str]]:
