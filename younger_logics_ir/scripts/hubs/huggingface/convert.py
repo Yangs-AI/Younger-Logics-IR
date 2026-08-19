@@ -141,6 +141,12 @@ def convert_optimum(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_di
                     except Exception as exception:
                         this_status_details[str(filepath)] = 'logicx_error'
 
+        if this_status == 'access_deny':
+            # jump out of the opset loop if Repository can not found
+            logger.warning(f'[opset {onnx_opset_version}] {this_status}: {this_error}')
+            status[onnx_opset_version] = (this_status, this_status_details)
+            break
+            
         if this_status == 'convert_error':
             # Permanent error -> skip remaining opsets entirely
             if is_permanent_error(this_error):
