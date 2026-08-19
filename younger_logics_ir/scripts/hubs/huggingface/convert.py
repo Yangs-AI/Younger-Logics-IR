@@ -145,6 +145,9 @@ def convert_optimum(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_di
             # jump out of the opset loop if Repository can not found
             logger.warning(f'[opset {onnx_opset_version}] {this_status}: {this_error}')
             status[onnx_opset_version] = (this_status, this_status_details)
+            # A 404 is a repository-level error rather than an opset-specific failure.
+            # Stop here, so `status` may not contain entries for subsequent opsets.
+            # Keep this semantic difference in mind if this logic is changed in the future.
             break
             
         if this_status == 'convert_error':
@@ -152,9 +155,6 @@ def convert_optimum(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_di
             if is_permanent_error(this_error):
                 logger.warning(f'[opset {onnx_opset_version}] {this_status}: {this_error}')
                 status[onnx_opset_version] = (this_status, this_status_details)
-                # A 404 is a repository-level error rather than an opset-specific failure.
-                # Stop here, so `status` may not contain entries for subsequent opsets.
-                # Keep this semantic difference in mind if this logic is changed in the future.
                 break
 
             # Unsupported operator with known minimum version -> jump there
