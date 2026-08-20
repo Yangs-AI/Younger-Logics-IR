@@ -45,7 +45,7 @@ def clean_cache(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpat
     clean_huggingface_hub_model_cache(model_id, ofc_cache_dirpath)
 
 
-def safe_optimum_export(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path, onnx_opset_version: int, results_queue: multiprocessing.Queue, device: str):
+def safe_optimum_export(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path, onnx_opset_version: int, results_queue: multiprocessing.Queue, device: str, library_name: str | None = None):
     import os
 
     # Redirect stdout and stderr to /dev/null BEFORE importing optimum/torch,
@@ -73,7 +73,7 @@ def safe_optimum_export(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cach
         try:
             from optimum.exporters.onnx import main_export
     
-            main_export(model_id, cvt_cache_dirpath, opset=onnx_opset_version, device=device, cache_dir=ofc_cache_dirpath, monolith=True, do_validation=False, trust_remote_code=True, no_post_process=True)
+            main_export(model_id, cvt_cache_dirpath, opset=onnx_opset_version, device=device, cache_dir=ofc_cache_dirpath, monolith=True, do_validation=False, trust_remote_code=True, no_post_process=True, library_name=library_name)
             this_status = 'success'
             this_error = ''
         except MemoryError as exception:
@@ -109,7 +109,7 @@ def safe_optimum_export(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cach
         results_queue.put((this_status, this_error))
 
 
-def convert_optimum(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path, device: Literal['cpu', 'cuda'] = 'cpu') -> tuple[dict[int, tuple[Literal['success', 'oversize', 'access_deny', 'convert_error', 'system_kill'], dict[str, Literal['success', 'logicx_error']]]], list[Instance], list[str]]:
+def convert_optimum(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path, device: Literal['cpu', 'cuda'] = 'cpu', library_name: str | None = None) -> tuple[dict[int, tuple[Literal['success', 'oversize', 'access_deny', 'convert_error', 'system_kill'], dict[str, Literal['success', 'logicx_error']]]], list[Instance], list[str]]:
     assert device in {'cpu', 'cuda'}
     status: dict[int, tuple[Literal['success', 'oversize', 'access_deny', 'convert_error', 'system_kill'], dict[str, Literal['success', 'logicx_error']]]] = dict()
     instances: list[Instance] = list()
@@ -120,7 +120,7 @@ def convert_optimum(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_di
     while opset_index < len(opset_versions):
         onnx_opset_version = opset_versions[opset_index]
         results_queue = multiprocessing.Queue()
-        subprocess = multiprocessing.Process(target=safe_optimum_export, args=(model_id, cvt_cache_dirpath, ofc_cache_dirpath, onnx_opset_version, results_queue, device))
+        subprocess = multiprocessing.Process(target=safe_optimum_export, args=(model_id, cvt_cache_dirpath, ofc_cache_dirpath, onnx_opset_version, results_queue, device, library_name))
         subprocess.start()
         subprocess.join()
 
@@ -527,6 +527,20 @@ def main(
     with tqdm.tqdm(total=len(model_infos), desc='Create Instances') as progress_bar:
         for convert_index, model_info in enumerate(model_infos, start=1):
             model_id = model_info['id']
+            if framework == 'optimum':
+                #Selecting a matched library from tags when the framework of module is optimum
+                tags = set(model_info.get('tags', []))
+                library_name = next(
+                    (lib for tag, lib in [('sentence-transformers','sentence_transformers'),
+                                          ('transformers','transformers'),
+                                          ('diffusers','diffusers'),
+                                          ('timm','timm')]
+                     if tag in tags),
+                    None
+                )
+            else:
+                #Other frameworks do not need library_name
+                library_name = None
             if last_handled_model_id is not None:
                 if model_id == last_handled_model_id:
                     last_handled_model_id = None
@@ -534,7 +548,7 @@ def main(
                 progress_bar.update(1)
                 continue
 
-            status, instances, artifacts = convert_method(model_id, cvt_cache_dirpath, ofc_cache_dirpath, device)
+            status, instances, artifacts = convert_method(model_id, cvt_cache_dirpath, ofc_cache_dirpath, device, library_name=library_name)
 
             model_owner, model_name = model_id.split('/')
             for index, (instance, artifact) in enumerate(zip(instances, artifacts), start=1):
