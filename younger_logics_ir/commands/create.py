@@ -41,7 +41,6 @@ def create_onnx_retrieve():
 @click.option('--token',                 required=False, type=str, default=None, help='The HuggingFace token, which requires registering an account on HuggingFace and manually setting the access token. If None, retrieve without HuggingFace access token.')
 @click.option('--mirror-url',            required=False, type=str, default='', help='The URL of the HuggingFace mirror site, which may sometimes speed up your data retrieval process, but this tools cannot guarantee data integrity of the mirror site. If not specified, use HuggingFace official site.')
 @click.option('--number-per-file',       required=False, type=int, default=None, help='Used to specify the number of data items saved in each file. If None, all data will be saved in a single file.')
-@click.option('--worker-number',         required=False, type=int, default=None, help='Used to indicate how many processes are concurrently performing the model conversion tasks.')
 @click.option('--rate-limit',            required=False, type=int, default=1000, help='API rate limit: max requests in the last 5 minutes. Default: 1000. Interval is calculated as 300s / (rate_limit * 0.9).')
 @click.option('--include-storage',       is_flag=True,   help='For Model_Infos mode: include usedStorage field for each model (requires additional API calls). Default: skip storage retrieval to save API quota.')
 @click.option('--logging-filepath',      required=False, type=click.Path(exists=False, file_okay=True, dir_okay=False, path_type=pathlib.Path), default=None, help='Path to the log file; if not provided, defaults to outputting to the terminal only.')
@@ -51,7 +50,6 @@ def create_onnx_retrieve_huggingface(
     token,
     mirror_url,
     number_per_file,
-    worker_number,
     rate_limit,
     include_storage,
     logging_filepath,
@@ -63,7 +61,6 @@ def create_onnx_retrieve_huggingface(
     kwargs = dict(
         token=token,
         number_per_file=number_per_file,
-        worker_number=worker_number,
         rate_limit=rate_limit,
         include_storage=include_storage,
     )

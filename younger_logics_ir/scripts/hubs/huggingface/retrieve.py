@@ -26,13 +26,13 @@ from younger_logics_ir.commons.logging import logger
 from .utils import get_huggingface_hub_model_infos, get_huggingface_hub_model_ids, get_huggingface_hub_metric_infos, get_huggingface_hub_task_infos, set_rate_limit
 
 
-def save_huggingface_model_infos(save_dirpath: pathlib.Path, token: str | None = None, number_per_file: int | None = None, worker_number: int | None = None, include_storage: bool = False):
-    get_huggingface_hub_model_infos(save_dirpath, token=token, number_per_file=number_per_file, worker_number=worker_number, include_storage=include_storage)
+def save_huggingface_model_infos(save_dirpath: pathlib.Path, token: str | None = None, number_per_file: int | None = None, include_storage: bool = False):
+    get_huggingface_hub_model_infos(save_dirpath, token=token, number_per_file=number_per_file, include_storage=include_storage)
     # times = 0
     # finished = False
     # while not finished:
     #     try:
-    #         get_huggingface_hub_model_infos(save_dirpath, token=token, number_per_file=number_per_file, worker_number=worker_number)
+    #         get_huggingface_hub_model_infos(save_dirpath, token=token, number_per_file=number_per_file)
     #         finished = True
     #     except:
     #         finished = False
@@ -78,7 +78,7 @@ def main(mode: Literal['Model_Infos', 'Model_IDs', 'Metric_Infos', 'Task_Infos']
     set_rate_limit(kwargs['rate_limit'])
 
     if mode == 'Model_Infos':
-        save_huggingface_model_infos(save_dirpath, token=kwargs['token'], number_per_file=kwargs['number_per_file'], worker_number=kwargs['worker_number'], include_storage=kwargs['include_storage'])
+        save_huggingface_model_infos(save_dirpath, token=kwargs['token'], number_per_file=kwargs['number_per_file'], include_storage=kwargs['include_storage'])
         return
 
     if mode == 'Model_IDs':
