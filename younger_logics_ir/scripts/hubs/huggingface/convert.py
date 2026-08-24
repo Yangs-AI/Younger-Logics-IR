@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2025-12-25 21:56:34
+# Last Modified time: 2026-08-24 15:17:22
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -87,7 +87,7 @@ def safe_optimum_export(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cach
 
             if (
                 type(exception).__name__ == "OutOfMemoryError"
-                or "CUDA out of memory" in err_text
+                or "CUDA out of memory" in error_text
                 or "out of memory" in error_text.lower()
             ):
                 this_status = "oversize"
