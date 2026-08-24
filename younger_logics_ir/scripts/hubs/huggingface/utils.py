@@ -315,10 +315,15 @@ def get_huggingface_hub_model_infos(save_dirpath: pathlib.Path, token: str | Non
     cache_dirpath = YLIR_CACHE_ROOT.joinpath(f'retrieve_hf')
     simple_model_infos_cache_dirpath = cache_dirpath.joinpath(f'simple_model_infos')
 
+    expand_fields = ['cardData', 'lastModified', 'likes', 'downloadsAllTime', 'siblings', 'tags']
+    if include_storage:
+        # Fetch usedStorage in bulk from the list API to avoid one extra request per model.
+        expand_fields.append('usedStorage')
+
     logger.info(f' v Retrieving All Simple Model Infos ...')
     chunks_of_simple_model_infos = CachedChunks(
         simple_model_infos_cache_dirpath,
-        get_all_data_from_huggingface_hub_api(f'{models_path}', params=dict(sort='lastModified', expand=['cardData', 'lastModified', 'likes', 'downloadsAllTime', 'siblings', 'tags']), token=token),
+        get_all_data_from_huggingface_hub_api(f'{models_path}', params=dict(sort='lastModified', expand=expand_fields), token=token),
         number_per_file
     )
     logger.info(f' ^ Total = {len(chunks_of_simple_model_infos)}.')
@@ -353,45 +358,20 @@ def get_huggingface_hub_model_infos(save_dirpath: pathlib.Path, token: str | Non
 
             model_infos_per_file = list()
 
-            if include_storage:
-                # Retrieve storage information for each model
-                for simple_model_info in chunk_of_simple_model_infos:
-                    model_id = simple_model_info['id']
-                    model_storage = get_huggingface_hub_model_storage(model_id, simple=True, token=token)
-                    progress_bar.set_description(f'Retrieve Model - {model_id}')
-                    simple_model_info['usedStorage'] = model_storage
-                    model_infos_per_file.append(simple_model_info)
-                    progress_bar.update(1)
+            # A single loop reduces Python branch/loop overhead; only fallback to
+            # per-model API calls when list API does not provide usedStorage.
+            for index, simple_model_info in enumerate(chunk_of_simple_model_infos):
+                model_id = simple_model_info['id']
 
-                # Deprecated multiprocessing path (kept for reference):
-                # if worker_number is None:
-                #     for simple_model_info in chunk_of_simple_model_infos:
-                #         model_id = simple_model_info['id']
-                #         model_storage = get_huggingface_hub_model_storage(model_id, simple=True, token=token)
-                #         progress_bar.set_description(f'Retrieve Model - {model_id}')
-                #         simple_model_info['usedStorage'] = model_storage
-                #         model_infos_per_file.append(simple_model_info)
-                #         progress_bar.update(1)
-                # else:
-                #     with multiprocessing.Pool(worker_number) as pool:
-                #         logger.info(f' - Assign Tasks ... ')
-                #         model_storages = [pool.apply_async(get_huggingface_hub_model_storage, (simple_model_info['id'], True, token)) for simple_model_info in chunk_of_simple_model_infos]
-                #
-                #         logger.info(f' - Get Results ... ')
-                #         for model_storage, simple_model_info in zip(model_storages, chunk_of_simple_model_infos):
-                #             model_storage = model_storage.get()
-                #             model_id = simple_model_info['id']
-                #             progress_bar.set_description(f'Retrieve Model - {model_id}')
-                #             simple_model_info['usedStorage'] = model_storage
-                #             model_infos_per_file.append(simple_model_info)
-                #             progress_bar.update(1)
-            else:
-                # Skip storage retrieval, just copy model infos
-                for simple_model_info in chunk_of_simple_model_infos:
-                    model_id = simple_model_info['id']
+                if include_storage:
+                    simple_model_info['usedStorage'] = simple_model_info.get('usedStorage', 0)
+
+                # set_description is relatively expensive; update periodically.
+                if index % 100 == 0:
                     progress_bar.set_description(f'Retrieve Model - {model_id}')
-                    model_infos_per_file.append(simple_model_info)
-                    progress_bar.update(1)
+
+                model_infos_per_file.append(simple_model_info)
+                progress_bar.update(1)
 
             save_json(model_infos_per_file, save_filepath, indent=2)
             logger.info(f'Total {len(model_infos_per_file)} Model Info Items Saved In: \'{save_filepath}\'.')
