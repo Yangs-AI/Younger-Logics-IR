@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2026-01-14 04:50:28
+# Last Modified time: 2026-08-25 16:27:03
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -315,15 +315,14 @@ def get_huggingface_hub_model_infos(save_dirpath: pathlib.Path, token: str | Non
     cache_dirpath = YLIR_CACHE_ROOT.joinpath(f'retrieve_hf')
     simple_model_infos_cache_dirpath = cache_dirpath.joinpath(f'simple_model_infos')
 
-    expand_fields = ['cardData', 'lastModified', 'likes', 'downloadsAllTime', 'siblings', 'tags']
-    if include_storage:
-        # Fetch usedStorage in bulk from the list API to avoid one extra request per model.
-        expand_fields.append('usedStorage')
-
     logger.info(f' v Retrieving All Simple Model Infos ...')
     chunks_of_simple_model_infos = CachedChunks(
         simple_model_infos_cache_dirpath,
-        get_all_data_from_huggingface_hub_api(f'{models_path}', params=dict(sort='lastModified', expand=expand_fields), token=token),
+        get_all_data_from_huggingface_hub_api(
+            f'{models_path}',
+            params=dict(sort='lastModified', expand=['cardData', 'createAt', 'lastModified', 'likes', 'downloads', 'downloadsAllTime', 'siblings', 'evalResults', 'pipeline_tag', 'tags']),
+            token=token,
+        ),
         number_per_file
     )
     logger.info(f' ^ Total = {len(chunks_of_simple_model_infos)}.')
@@ -358,13 +357,15 @@ def get_huggingface_hub_model_infos(save_dirpath: pathlib.Path, token: str | Non
 
             model_infos_per_file = list()
 
-            # A single loop reduces Python branch/loop overhead; only fallback to
-            # per-model API calls when list API does not provide usedStorage.
+            # NOTE:
+            # We intentionally do NOT request usedStorage from the list endpoint.
+            # In practice this field is not reliably available in list responses,
+            # so include_storage must fetch usedStorage model-by-model for accuracy.
             for index, simple_model_info in enumerate(chunk_of_simple_model_infos):
                 model_id = simple_model_info['id']
 
                 if include_storage:
-                    simple_model_info['usedStorage'] = simple_model_info.get('usedStorage', 0)
+                    simple_model_info['usedStorage'] = get_huggingface_hub_model_storage(model_id, simple=True, token=token)
 
                 # set_description is relatively expensive; update periodically.
                 if index % 100 == 0:
