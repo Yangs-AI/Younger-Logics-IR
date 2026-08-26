@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2026-08-24 15:17:22
+# Last Modified time: 2026-08-26 10:36:38
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -39,7 +39,6 @@ from younger_logics_ir.scripts.commons.utils import get_onnx_opset_versions, get
 from .utils import get_huggingface_hub_model_readme, get_huggingface_hub_model_siblings, clean_huggingface_hub_model_cache, infer_supported_frameworks, is_permanent_error, get_minimum_opset_from_error
 
 
-
 def clean_cache(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path):
     delete_dir(cvt_cache_dirpath, only_clean=True)
     clean_huggingface_hub_model_cache(model_id, ofc_cache_dirpath)
@@ -47,6 +46,7 @@ def clean_cache(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpat
 
 def safe_optimum_export(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path, onnx_opset_version: int, results_queue: multiprocessing.Queue, device: str, library_name: str | None = None):
     import os
+    import inspect
 
     # Redirect stdout and stderr to /dev/null BEFORE importing optimum/torch,
     # otherwise torch registration warnings leak to the parent terminal.
@@ -72,8 +72,36 @@ def safe_optimum_export(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cach
 
         try:
             from optimum.exporters.onnx import main_export
-    
-            main_export(model_id, cvt_cache_dirpath, opset=onnx_opset_version, device=device, cache_dir=ofc_cache_dirpath, monolith=True, do_validation=False, trust_remote_code=True, no_post_process=True, library_name=library_name)
+
+            export_kwargs = dict(
+                opset=onnx_opset_version,
+                device=device,
+                cache_dir=ofc_cache_dirpath,
+                monolith=True,
+                do_validation=False,
+                trust_remote_code=True,
+                no_post_process=True,
+                library_name=library_name,
+            )
+
+            # Why switch by opset:
+            # - Optimum docs recommend dynamo exporter for opset >= 18, while
+            #   opset < 18 can keep the legacy TorchScript exporter path.
+            # - TorchScript is part of PyTorch; no standalone TorchScript package
+            #   is required.
+            # Ref: https://huggingface.co/docs/optimum-onnx/onnx/usage_guides/export_a_model
+            # Keep a guard for environments where main_export has no `dynamo`
+            # parameter (older optimum versions).
+            if 'dynamo' in inspect.signature(main_export).parameters:
+                export_kwargs['dynamo'] = (onnx_opset_version >= 18)
+
+            # Why not enable custom export knobs here by default:
+            # The custom path (model_kwargs/custom_onnx_configs/fn_get_submodels)
+            # is model-family-specific and may require per-architecture config.
+            # The current pipeline favors broad, stable batch conversion.
+            # Ref: https://huggingface.co/docs/optimum-onnx/onnx/usage_guides/export_a_model#customize-the-export-of-official-transformers-models
+
+            main_export(model_id, cvt_cache_dirpath, **export_kwargs)
             this_status = 'success'
             this_error = ''
         except MemoryError as exception:
