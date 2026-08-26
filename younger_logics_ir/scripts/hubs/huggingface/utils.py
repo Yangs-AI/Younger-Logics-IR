@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2026-08-25 16:27:03
+# Last Modified time: 2026-08-26 10:22:21
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -320,7 +320,7 @@ def get_huggingface_hub_model_infos(save_dirpath: pathlib.Path, token: str | Non
         simple_model_infos_cache_dirpath,
         get_all_data_from_huggingface_hub_api(
             f'{models_path}',
-            params=dict(sort='lastModified', expand=['cardData', 'createAt', 'lastModified', 'likes', 'downloads', 'downloadsAllTime', 'siblings', 'evalResults', 'pipeline_tag', 'tags']),
+            params=dict(sort='lastModified', expand=['cardData', 'createdAt', 'lastModified', 'likes', 'downloads', 'downloadsAllTime', 'siblings', 'evalResults', 'pipeline_tag', 'tags']),
             token=token,
         ),
         number_per_file
