@@ -42,10 +42,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-scripts-hubs-hf = ["huggingface_hub", "torch", "tf2onnx", "optimum[exporters]", "transformers", "diffusers[torch]", "sentence-transformers", "timm"]
+scripts-hubs-hf = ["huggingface_hub", "torch", "tf2onnx", "optimum-onnx[onnxruntime]", "transformers", "diffusers[torch]", "sentence-transformers", "timm", "stable-baselines3[extra]"]
 scripts-hubs-ox = []
 scripts-hubs-tr = ["torch", "torchvision"]
-scripts-hubs = ["numpy", "pandas", "isocodes", "huggingface_hub", "tf2onnx", "optimum[exporters]", "transformers", "diffusers[torch]", "sentence-transformers", "timm", "torch", "torchvision"]
+scripts-hubs = ["numpy", "pandas", "isocodes", "huggingface_hub", "tf2onnx", "optimum-onnx[onnxruntime]", "transformers", "diffusers[torch]", "sentence-transformers", "timm", "torch", "torchvision", "stable-baselines3[extra]"]
 
 scripts-bootstrap = ["numpy", "pandas", "scipy", "scikit-learn", "umap", "seaborn", "matplotlib", "hdbscan"]
 
