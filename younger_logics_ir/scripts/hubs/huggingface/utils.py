@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2026-08-26 10:22:21
+# Last Modified time: 2026-09-09 11:37:47
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -539,23 +539,28 @@ def extract_possible_metrics_from_readme(readme: str) -> dict[str, list[str] | l
 ##############################################################################################
 
 
-def infer_supported_frameworks(model_info: dict) -> list[Literal['optimum', 'onnx', 'keras', 'tflite']]:
-    all_supported_frameworks = set(['optimum', 'onnx', 'keras', 'tflite'])
+def infer_supported_frameworks(model_info: dict) -> list[Literal['optimum', 'onnx', 'keras', 'tflite', 'stable_baselines3']]:
+    all_supported_frameworks = set(['optimum', 'onnx', 'keras', 'tflite', 'stable_baselines3'])
+    all_supported_tags = set(['transformers', 'diffusers', 'timm', 'sentence-transformers', 'stable-baselines3'])
+    frameworks = set([])
     tags = set(model_info['tags'])
-    if len(tags & set(['transformers', 'diffusers', 'timm', 'sentence-transformers'])) == 0:
+    if len(tags & all_supported_tags) == 0:
         for sibling in model_info['siblings']:
             filename = pathlib.Path(sibling['rfilename'])
             if filename.suffix in ['.keras', '.hdf5', '.h5', '.pbtxt', '.pb']:
-                tags.add('keras')
+                frameworks.add('keras')
 
             if filename.suffix in ['.tflite']:
-                tags.add('tflite')
+                frameworks.add('tflite')
 
             if filename.suffix in ['.onnx']:
-                tags.add('onnx')
+                frameworks.add('onnx')
+
+    elif 'stable-baselines3' in tags:
+        frameworks.add('stable_baselines3')
 
     else:
-        tags.add('optimum')
+        frameworks.add('optimum')
 
-    supported_frameworks = list(tags & all_supported_frameworks)
+    supported_frameworks = list(frameworks & all_supported_frameworks)
     return supported_frameworks
