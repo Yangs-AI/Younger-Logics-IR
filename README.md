@@ -132,3 +132,19 @@ younger logics ir create onnx retrieve huggingface \
     --number-per-file 100000 \
     --logging-filepath /path/to/working_directory/.younger.log
 ```
+
+
+## Releases
+
+This repository publishes its Python package independently to GitHub and PyPI.
+The release version is defined in `pyproject.toml`; a matching `v<version>` tag
+runs `.github/workflows/release.yml`. Pull requests and manual runs validate the
+build without publishing. Internal dependency bounds declare which Younger and
+component versions are compatible.
+
+Before the first release, configure the PyPI Trusted Publisher for this repository,
+workflow `release.yml`, and GitHub environment `pypi`. Publish required Younger/IR
+versions before dependent packages. See the
+[Younger release guide](https://github.com/Yangs-AI/Younger/blob/dev/RELEASE.md)
+for setup, dependency order, and combination validation. Conda distribution is
+deferred.
