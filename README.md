@@ -145,6 +145,38 @@ component versions are compatible.
 Before the first release, configure the PyPI Trusted Publisher for this repository,
 workflow `release.yml`, and GitHub environment `pypi`. Publish required Younger/IR
 versions before dependent packages. See the
-[Younger release guide](https://github.com/Yangs-AI/Younger/blob/dev/RELEASE.md)
+[routine release checklist](https://github.com/Yangs-AI/Younger/blob/main/RELEASE.md#routine-release)
 for setup, dependency order, and combination validation. Conda distribution is
 deferred.
+
+For each IR release, update this repository's `pyproject.toml` version and any
+required dependency bounds on `dev`, run the relevant tests, and push the changes.
+The required Younger version must already be installable from PyPI before IR's
+standalone installation check can pass. Open a `dev` to `main` PR and confirm
+**Build and release** jobs `build` and `verify` succeeded, then merge it.
+
+From this repository's root (`younger/logics/ir` in a parent checkout), with a
+clean working tree and the intended official `origin`, inspect the release:
+
+```bash
+git fetch origin --tags
+git switch main
+git pull --ff-only origin main
+git log -1 --oneline
+release_version=$(python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')
+git tag --list "v${release_version}"
+```
+
+Confirm the version and commit. If the tag is already listed, stop and inspect it.
+Otherwise, publish this IR version by creating and pushing its tag:
+
+```bash
+git tag -a "v${release_version}" -m "Release ${release_version}"
+git push origin "v${release_version}"
+```
+
+In GitHub **Actions**, confirm the tag run's `build`, `verify`, `publish`, and
+`github-release` jobs succeeded. Verify the exact version from PyPI in a clean
+environment with `pip check` and `younger-logics-ir --help`. Then update the parent
+repository's IR pointer and `releases/current.txt` for the new combination.
+Compatible IR fixes do not require matching version bumps in Younger or DL.
