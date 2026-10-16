@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2026-09-09 14:40:09
+# Last Modified time: 2026-10-16 14:47:30
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -15,9 +15,11 @@
 
 
 import os
+import sys
 import onnx
 import tqdm
 import pathlib
+import traceback
 import multiprocessing
 
 from typing import Any, Literal, Callable
@@ -36,7 +38,7 @@ from younger_logics_ir.commons.constants import YLIROriginHub
 
 from younger_logics_ir.scripts.commons.utils import get_onnx_opset_versions, get_onnx_model_opset_version
 
-from .utils import get_huggingface_hub_model_readme, get_huggingface_hub_model_siblings, clean_huggingface_hub_model_cache, infer_supported_frameworks, is_permanent_error, get_minimum_opset_from_error
+from .utils import get_huggingface_hub_model_readme, get_huggingface_hub_model_siblings, clean_huggingface_hub_model_cache, infer_supported_frameworks, is_permanent_error, get_minimum_opset_from_error, get_huggingface_hub_model_storage
 
 
 def clean_cache(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path):
@@ -59,16 +61,28 @@ def safe_optimum_export(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cach
     # os.close(devnull)
 
     saved_fds = {}
+    devnull = None
 
     try:
-        saved_fds = {1: os.dup(1), 2: os.dup(2)}
-        devnull = os.open(os.devnull, os.O_WRONLY)
-
+        # Best-effort stdout/stderr redirection.
         try:
+            for fd in (1, 2):
+                saved_fds[fd] = os.dup(fd)
+
+            devnull = os.open(os.devnull, os.O_WRONLY)
+
             os.dup2(devnull, 1)
             os.dup2(devnull, 2)
+        except OSError:
+            # Redirection failure should not prevent model export.
+            pass
         finally:
-            os.close(devnull)
+            if devnull is not None:
+                try:
+                    os.close(devnull)
+                except OSError:
+                    pass
+                
 
         try:
             from optimum.exporters.onnx import main_export
@@ -128,11 +142,17 @@ def safe_optimum_export(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cach
         this_error = f"{type(exception).__name__}: {exception}"
 
     finally:
+        # Restore all saved descriptors, including partially redirected ones.
         for fd, saved in saved_fds.items():
             try:
                 os.dup2(saved, fd)
+            except OSError:
+                pass
             finally:
-                os.close(saved)
+                try:
+                    os.close(saved)
+                except OSError:
+                    pass
 
         results_queue.put((this_status, this_error))
 
@@ -247,7 +267,7 @@ def safe_sb3_export(model_id: str, sb3_model_path: pathlib.Path, onnx_model_path
         else:
             return stable_baselines3.__dict__[sb3_algorithm_name.upper()].load(sb3_model_path, custom_objects={"optimize_memory_usage": False, "handle_timeout_termination": False})
 
-    class PureMathWrapper:
+    class PureMathWrapper(torch.nn.Module):
         #Bypasses the strict probability distribution check in PyTorch 2.0+ Dynamo 
         #by manually mapping the pure mathematical tensor flow.
         def __init__(self, model):
@@ -274,13 +294,6 @@ def safe_sb3_export(model_id: str, sb3_model_path: pathlib.Path, onnx_model_path
                 self.keys = list(model.observation_space.spaces.keys())
             else:
                 self.keys = list()
-
-        def __call__(self, *args):
-            return self.forward(*args)
-
-        def eval(self):
-            self.net.eval()
-            return self
 
         def forward(self, *args):
             if self.is_dict:
@@ -313,17 +326,19 @@ def safe_sb3_export(model_id: str, sb3_model_path: pathlib.Path, onnx_model_path
         model= PureMathWrapper(model)
         model.eval()
 
+        model_device = next(model.parameters()).device
         if model.is_dict:
-            dummy_input = tuple(torch.randn(1, *model.observation_space.spaces[key].shape) for key in model.keys)
+            dummy_input = tuple(torch.randn(1, *model.observation_space.spaces[key].shape.to(model_device)) for key in model.keys)
             input_names = [f'input_{key}' for key in model.keys]
         else:
-            dummy_input = (torch.randn(1, *model.observation_space), )
+            dummy_input = (torch.randn(1, *model.observation_space).to(model_device), )
             input_names = ['input_observation']
 
         torch.onnx.export(model, dummy_input, onnx_model_path, opset_version=onnx_opset_version, input_names=input_names, output_names=['output_action'])
         this_status = 'success'
     except Exception as exception:
         this_status = 'convert_error'
+        logger.error(f"\nFail. {model_id} Caused by：\n{traceback.format_exc()}\n", file=sys.stderr)
     finally:
         results_queue.put(this_status)
 
@@ -574,7 +589,7 @@ def convert_onnx(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpa
     return status, instances, artifacts
 
 
-def get_model_infos_and_convert_method(model_infos_filepath: pathlib.Path, framework: Literal['optimum', 'onnx', 'keras', 'tflite', 'stable_baselines3'], model_size_limit: tuple[int, int]) -> tuple[list[dict[str, Any]], Callable[[str, pathlib.Path, pathlib.Path, Literal['cpu', 'cuda']], tuple[dict[str, dict[int, Any] | Literal['system_kill']], list[Instance], list[str]]]]:
+def get_model_infos_and_convert_method(model_infos_filepath: pathlib.Path, framework: Literal['optimum', 'onnx', 'keras', 'tflite', 'stable_baselines3']) -> tuple[list[dict[str, Any]], Callable[[str, pathlib.Path, pathlib.Path, Literal['cpu', 'cuda']], tuple[dict[str, dict[int, Any] | Literal['system_kill']], list[Instance], list[str]]]]:
     # This is the convert order.
     supported_frameworks: list[str] = ['optimum', 'onnx', 'keras', 'tflite', 'stable_baselines3']
     supported_convert_methods: dict[str, Callable[[str, pathlib.Path, pathlib.Path, Literal['cpu', 'cuda'], str | None], tuple[dict[str, dict[int, Any] | Literal['system_kill']], list[Instance], list[str]]]] = dict(
@@ -597,7 +612,7 @@ def get_model_infos_and_convert_method(model_infos_filepath: pathlib.Path, frame
     for model_info in load_json(model_infos_filepath):
         model_frameworks = get_model_frameworks(infer_supported_frameworks(model_info))
         used_storage = model_info.get('usedStorage', 0)
-        if framework in model_frameworks and model_size_limit[0] <= used_storage and used_storage <= model_size_limit[1]:
+        if framework in model_frameworks:
             model_infos.append(model_info)
 
     convert_method = supported_convert_methods[framework]
@@ -622,6 +637,7 @@ def get_convert_status_and_last_handled_model_id(sts_cache_dirpath: pathlib.Path
 
 
 def set_convert_status_last_handled_model_id(sts_cache_dirpath: pathlib.Path, framework: Literal['optimum', 'onnx', 'keras', 'tflite', 'stable_baselines3'], model_size_limit: tuple[int, int], convert_status: dict[str, dict[str, Any]], model_id: str):
+    # TODO: The typing notation of the convert_status should be revised in future.
     convert_status_filepath = sts_cache_dirpath.joinpath(f'{framework}_{model_size_limit[0]}_{model_size_limit[1]}.sts')
     with open(convert_status_filepath, 'a') as convert_status_file:
         convert_status_file.write(f'{saves_json((model_id, convert_status))}\n')
@@ -683,7 +699,7 @@ def main(
 
     model_size_limit = (model_size_limit_l, model_size_limit_r)
 
-    model_infos, convert_method = get_model_infos_and_convert_method(model_infos_filepath, framework, model_size_limit)
+    model_infos, convert_method = get_model_infos_and_convert_method(model_infos_filepath, framework)
     if estimate:
         logger.info(f'Only Estimate. Models To Be Converted: {len(model_infos)}; Model Infos Filename: {model_infos_filepath.name}.')
         return
@@ -721,53 +737,57 @@ def main(
     with tqdm.tqdm(total=len(model_infos), desc='Create Instances') as progress_bar:
         for convert_index, model_info in enumerate(model_infos, start=1):
             model_id = model_info['id']
-            if framework == 'optimum':
-                #Selecting a matched library from tags when the framework of module is optimum
-                tags = set(model_info.get('tags', []))
-                library_name = next(
-                    (lib for tag, lib in [('sentence-transformers','sentence_transformers'),
-                                          ('transformers','transformers'),
-                                          ('diffusers','diffusers'),
-                                          ('timm','timm')]
-                     if tag in tags),
-                    None
-                )
-            else:
-                #Other frameworks do not need library_name
-                library_name = None
-            if last_handled_model_id is not None:
-                if model_id == last_handled_model_id:
-                    last_handled_model_id = None
-                progress_bar.set_description(f'Converted, Skip - {model_id}')
-                progress_bar.update(1)
-                continue
-
-            status, instances, artifacts = convert_method(model_id, cvt_cache_dirpath, ofc_cache_dirpath, device, library_name=library_name)
-
-            model_owner, model_name = model_id.split('/')
-            for index, (instance, artifact) in enumerate(zip(instances, artifacts), start=1):
-                instance.insert_label(
-                    Implementation(
-                        origin=Origin(YLIROriginHub.HUGGINGFACE, model_owner, model_name, artifact),
-                        like=model_info['likes'],
-                        download=model_info['downloadsAllTime'],
+            possible_model_size = get_huggingface_hub_model_storage(model_id, token=token)
+            if model_size_limit_l <= possible_model_size and possible_model_size <= model_size_limit_r:
+                if framework == 'optimum':
+                    #Selecting a matched library from tags when the framework of module is optimum
+                    tags = set(model_info.get('tags', []))
+                    library_name = next(
+                        (lib for tag, lib in [('sentence-transformers','sentence_transformers'),
+                                            ('transformers','transformers'),
+                                            ('diffusers','diffusers'),
+                                            ('timm','timm')]
+                        if tag in tags),
+                        None
                     )
-                )
-                instance_unique = instance.unique
+                else:
+                    #Other frameworks do not need library_name
+                    library_name = None
+                if last_handled_model_id is not None:
+                    if model_id == last_handled_model_id:
+                        last_handled_model_id = None
+                    progress_bar.set_description(f'Converted, Skip - {model_id}')
+                    progress_bar.update(1)
+                    continue
+
+                status, instances, artifacts = convert_method(model_id, cvt_cache_dirpath, ofc_cache_dirpath, device, library_name=library_name)
+
+                model_owner, model_name = model_id.split('/')
+                for index, (instance, artifact) in enumerate(zip(instances, artifacts), start=1):
+                    instance.insert_label(
+                        Implementation(
+                            origin=Origin(YLIROriginHub.HUGGINGFACE, model_owner, model_name, artifact),
+                            like=model_info['likes'],
+                            download=model_info['downloadsAllTime'],
+                        )
+                    )
+                    instance_unique = instance.unique
+                    try:
+                        instance.save(instances_dirpath.joinpath(instance_unique))
+                    except FileExistsError as exception:
+                        logger.warning(f'-> Skip! Instance Already Exists: {instance_unique}')
+
                 try:
-                    instance.save(instances_dirpath.joinpath(instance_unique))
-                except FileExistsError as exception:
-                    logger.warning(f'-> Skip! Instance Already Exists: {instance_unique}')
+                    readme = get_huggingface_hub_model_readme(model_id, token=token)
+                except Exception as exception:
+                    readme = ''
 
-            try:
-                readme = get_huggingface_hub_model_readme(model_id, token=token)
-            except Exception as exception:
-                readme = ''
-
-            if readme == '':
-                pass
+                if readme == '':
+                    pass
+                else:
+                    save_json(readme, readmes_dirpath.joinpath(f'{model_owner}_YLIR_{model_name}.json'))
             else:
-                save_json(readme, readmes_dirpath.joinpath(f'{model_owner}_YLIR_{model_name}.json'))
+                status = dict(special_status='size_limit')
 
             set_convert_status_last_handled_model_id(sts_cache_dirpath, framework, model_size_limit, status, model_id)
             clean_cache(model_id, cvt_cache_dirpath, ofc_cache_dirpath)
