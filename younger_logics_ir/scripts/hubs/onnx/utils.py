@@ -23,7 +23,7 @@ from younger.commons.string import extract_possible_tables_from_readme_string
 
 
 def get_onnx_hub_model_infos() -> list[dict[str, Any]]:
-    response = requests.get("https://github.com/onnx/models/raw/main/README.md")
+    response = requests.get("https://github.com/onnx/models/raw/main/README.md", timeout=30)
     if response.status_code == 200:
         readme = response.text
     else:
@@ -78,7 +78,7 @@ def get_onnx_hub_model_infos() -> list[dict[str, Any]]:
     tasks = ["Computer_Vision", "Generative_AI", "Graph_Machine_Learning", "Natural_Language_Processing"]
     authors = ["timm", "torch_hub", "torchvision", "transformers", "graph_convolutions"]
 
-    response = requests.get("https://api.github.com/repos/onnx/models/git/trees/main?recursive=1")
+    response = requests.get("https://api.github.com/repos/onnx/models/git/trees/main?recursive=1", timeout=30)
 
     if response.status_code == 200:
         tree_data = response.json()["tree"]

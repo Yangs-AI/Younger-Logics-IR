@@ -27,7 +27,7 @@ from younger_logics_ir.scripts.hubs.huggingface.convert import get_model_infos_a
 @click.option('--model-infos-filename', required=True, type=str, help='Model Infos Filename.')
 @click.option('--load-dirpath',         required=True, type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=pathlib.Path), help='Model Infos load directory.')
 @click.option('--save-dirpath',         required=True, type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=pathlib.Path), help='Model Infos save directory.')
-@click.option('--framework',            required=True, type=click.Choice(['optimum', 'onnx', 'keras', 'tflite'], case_sensitive=True), help='Indicates the framework to which the model belonged prior to conversion.')
+@click.option('--framework',            required=True, type=click.Choice(['optimum', 'onnx', 'keras', 'tflite', 'stable_baselines3'], case_sensitive=True), help='Indicates the framework to which the model belonged prior to conversion.')
 @click.option('--limit-l',              required=True, type=int, help='Indicates the range left border model size limit.')
 @click.option('--limit-r',              required=True, type=int, help='Indicates the range right border model size limit.')
 @click.option('--number-of-file',       required=True, type=int, help='Indicates the number of files to save.')

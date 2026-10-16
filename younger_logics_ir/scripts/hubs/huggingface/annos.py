@@ -282,9 +282,10 @@ def get_heuristic_annotations(model_id: str, model_card_data: ModelCardData) -> 
             if dataset_name in task_name:
                 dataset_name, task_name = task_name, dataset_name
 
-            dataset_split = detect_dataset_split(hf_dataset_split)
-            if dataset_split == '':
-                dataset_split = detect_dataset_split(clean_string(detailed_dataset_name))
+            dataset_split = (
+                detect_dataset_split(hf_dataset_split)
+                or detect_dataset_split(clean_string(detailed_dataset_name))
+            )
 
             if isinstance(hf_metric_value, list):
                 logger.warning(f'Skip. Useless Metric Value. Model ID {model_id} {eval_result.metric_value}')
@@ -305,17 +306,18 @@ def get_heuristic_annotations(model_id: str, model_card_data: ModelCardData) -> 
                 candidate_hf_metrics = [([hf_metric_type, hf_metric_name], str(hf_metric_value))]
 
             for mnames, mvalue in candidate_hf_metrics:
-                if split == '':
-                    split = detect_dataset_split(clean_string(get_detailed_string(mnames)))
+                metric_dataset_split = (
+                    dataset_split
+                    or detect_dataset_split(clean_string(get_detailed_string(mnames)))
+                    or 'test'
+                )
 
                 parsed_mname = parse_metric(mnames)
                 # parsed_mname = mname if parsed_mname == '' else parsed_mname
                 norm_mvalue = normalize_metric_value(parsed_mname, mvalue)
                 metric_info = (parsed_mname, norm_mvalue)
 
-                if split == '':
-                    split = 'test'
-                dataset_info = (dataset_name, dataset_split)
+                dataset_info = (dataset_name, metric_dataset_split)
 
                 annotations['eval_results'].append(
                     dict(
