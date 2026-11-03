@@ -127,12 +127,13 @@ def create_onnx_convert():
 @click.option('--model-size-limit-l',   required=False, type=int, default=None, help='Used to filter out oversized models to prevent process interruptions due to excessive storage usage. (Note: The storage space occupied by models is a simple estimation and may have inaccuracies. Please use with caution.)')
 @click.option('--model-size-limit-r',   required=False, type=int, default=None, help='Used to filter out oversized models to prevent process interruptions due to excessive storage usage. (Note: The storage space occupied by models is a simple estimation and may have inaccuracies. Please use with caution.)')
 @click.option('--token',                required=False, type=str, default=None, help='The HuggingFace token, which requires registering an account on HuggingFace and manually setting the access token. If None, retrieve without HuggingFace access token.')
+@click.option('--verbose',              is_flag=True,   help='Show Optimum worker output, including model download progress.')
 @click.option('--estimate',             is_flag=True,   help='Use to estimate models will be converted. No Conversion Processes.')
 @click.option('--logging-filepath',     required=False, type=click.Path(exists=False, file_okay=True, dir_okay=False, path_type=pathlib.Path), default=None, help='Path to the log file; if not provided, defaults to outputting to the terminal only.')
 def create_onnx_convert_huggingface(
     model_infos_filepath,
     save_dirpath, cache_dirpath,
-    device, framework, library_name, model_size_limit_l, model_size_limit_r, token, estimate,
+    device, framework, library_name, model_size_limit_l, model_size_limit_r, token, estimate, verbose,
     logging_filepath
 ):
     equip_logger(logging_filepath=logging_filepath)
@@ -144,7 +145,7 @@ def create_onnx_convert_huggingface(
 
     from younger_logics_ir.scripts.hubs.huggingface import convert
 
-    convert.main(model_infos_filepath, save_dirpath, cache_dirpath, device=device, framework=framework, library_name=library_name, model_size_limit_l=model_size_limit_l, model_size_limit_r=model_size_limit_r, token=token, estimate=estimate)
+    convert.main(model_infos_filepath, save_dirpath, cache_dirpath, device=device, framework=framework, library_name=library_name, model_size_limit_l=model_size_limit_l, model_size_limit_r=model_size_limit_r, token=token, estimate=estimate, verbose=verbose)
 
 
 @create_onnx_convert.command(name='onnx')

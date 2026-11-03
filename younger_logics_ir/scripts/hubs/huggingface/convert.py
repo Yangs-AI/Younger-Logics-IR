@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2026-11-03 21:53:45
+# Last Modified time: 2026-11-03 23:23:35
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -46,43 +46,35 @@ def clean_cache(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpat
     clean_huggingface_hub_model_cache(model_id, ofc_cache_dirpath)
 
 
-def safe_optimum_export(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path, onnx_opset_version: int, results_queue: multiprocessing.Queue, device: str, library_name: str | None = None):
+def safe_optimum_export(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path, onnx_opset_version: int, results_queue: multiprocessing.Queue, device: str, library_name: str | None = None, verbose: bool = False):
     import os
     import inspect
 
-    # Redirect stdout and stderr to /dev/null BEFORE importing optimum/torch,
-    # otherwise torch registration warnings leak to the parent terminal.
-    # All communication back to the parent process goes through the results_queue.
-    
-    # saved_fds = {1: os.dup(1), 2: os.dup(2)}
-    # devnull = os.open(os.devnull, os.O_WRONLY)
-    # os.dup2(devnull, 1)
-    # os.dup2(devnull, 2)
-    # os.close(devnull)
-
+    # Keep worker output visible when debugging; otherwise suppress it before
+    # importing optimum/torch. Results always return through results_queue.
     saved_fds = {}
     devnull = None
 
     try:
-        # Best-effort stdout/stderr redirection.
-        try:
-            for fd in (1, 2):
-                saved_fds[fd] = os.dup(fd)
+        if not verbose:
+            # Best-effort stdout/stderr redirection.
+            try:
+                for fd in (1, 2):
+                    saved_fds[fd] = os.dup(fd)
 
-            devnull = os.open(os.devnull, os.O_WRONLY)
+                devnull = os.open(os.devnull, os.O_WRONLY)
 
-            os.dup2(devnull, 1)
-            os.dup2(devnull, 2)
-        except OSError:
-            # Redirection failure should not prevent model export.
-            pass
-        finally:
-            if devnull is not None:
-                try:
-                    os.close(devnull)
-                except OSError:
-                    pass
-                
+                os.dup2(devnull, 1)
+                os.dup2(devnull, 2)
+            except OSError:
+                # Redirection failure should not prevent model export.
+                pass
+            finally:
+                if devnull is not None:
+                    try:
+                        os.close(devnull)
+                    except OSError:
+                        pass
 
         try:
             from optimum.exporters.onnx import main_export
@@ -157,7 +149,7 @@ def safe_optimum_export(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cach
         results_queue.put((this_status, this_error))
 
 
-def convert_optimum(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path, device: Literal['cpu', 'cuda'] = 'cpu', library_name: str | None = None) -> tuple[dict[int, tuple[Literal['success', 'oversize', 'access_deny', 'convert_error', 'system_kill'], dict[str, Literal['success', 'logicx_error']]]], list[Instance], list[str]]:
+def convert_optimum(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path, device: Literal['cpu', 'cuda'] = 'cpu', library_name: str | None = None, verbose: bool = False) -> tuple[dict[int, tuple[Literal['success', 'oversize', 'access_deny', 'convert_error', 'system_kill'], dict[str, Literal['success', 'logicx_error']]]], list[Instance], list[str]]:
     assert device in {'cpu', 'cuda'}
     status: dict[int, tuple[Literal['success', 'oversize', 'access_deny', 'convert_error', 'system_kill'], dict[str, Literal['success', 'logicx_error']]]] = dict()
     instances: list[Instance] = list()
@@ -173,7 +165,7 @@ def convert_optimum(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_di
     while opset_index < len(opset_versions):
         onnx_opset_version = opset_versions[opset_index]
         results_queue = multiprocessing.Queue()
-        subprocess = multiprocessing.Process(target=safe_optimum_export, args=(model_id, cvt_cache_dirpath, ofc_cache_dirpath, onnx_opset_version, results_queue, device, library_name))
+        subprocess = multiprocessing.Process(target=safe_optimum_export, args=(model_id, cvt_cache_dirpath, ofc_cache_dirpath, onnx_opset_version, results_queue, device, library_name, verbose))
         subprocess.start()
         subprocess.join()
 
@@ -673,6 +665,7 @@ def main(
     token: str | None = None,
     estimate: bool = False,
     library_name: Literal['transformers', 'diffusers', 'timm', 'sentence_transformers'] | None = None,
+    verbose: bool = False,
 ):
     """
     Retrieve Metadata of HuggingFace Models and Save Them Into Files.
@@ -687,6 +680,7 @@ def main(
     :type device: Literal[&#39;cpu&#39;, &#39;cuda&#39;], optional
     :param framework: _description_, defaults to 'optimum'
     :type framework: Literal[&#39;optimum&#39;, &#39;onnx&#39;, &#39;keras&#39;, &#39;tflite&#39;], optional
+    :param verbose: Show Optimum worker output, including model download progress.
     :param library_name: Required for optimum; only convert models belonging to this library.
     :param model_size_limit_l: _description_, defaults to None
     :type model_size_limit_l: int | None, optional
@@ -773,7 +767,10 @@ def main(
                     progress_bar.update(1)
                     continue
 
-                status, instances, artifacts = convert_method(model_id, cvt_cache_dirpath, ofc_cache_dirpath, device, library_name=model_library_name)
+                if framework == 'optimum':
+                    status, instances, artifacts = convert_method(model_id, cvt_cache_dirpath, ofc_cache_dirpath, device, library_name=model_library_name, verbose=verbose)
+                else:
+                    status, instances, artifacts = convert_method(model_id, cvt_cache_dirpath, ofc_cache_dirpath, device, library_name=model_library_name)
 
                 model_owner, model_name = model_id.split('/')
                 for index, (instance, artifact) in enumerate(zip(instances, artifacts), start=1):

@@ -226,6 +226,9 @@ models using the existing tag priority: sentence-transformers, transformers,
 diffusers, timm. It does not force unrelated models through the selected library.
 `--library-name` is required with `--framework optimum`, including estimate runs.
 Add `--estimate` to count the selected models without exporting them.
+Add `--verbose` to show Optimum worker output, including model download progress
+and backend warnings. Worker output is suppressed by default; this option does
+not change the output of other conversion frameworks.
 
 For TensorFlow, install `scripts-hubs-hf-tensorflow` in a Python 3.11 environment
 and use `--framework keras` or `--framework tflite`, without `--library-name`.
