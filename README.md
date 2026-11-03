@@ -92,10 +92,13 @@ pip install "younger-logics-ir[EXTRA_NAME]"
 
 Available extras:
 
-- `scripts-hubs-hf`: Crawl models and metadata from Hugging Face Hub and build Younger IR-Dataset (FromONNX). Each sample is organized as LogicX or Instance (DAG + related info).
-- `scripts-hubs-ox`: Crawl models and metadata from the ONNX Model Zoo. This is no longer maintained since most models moved to Hugging Face Hub.
-- `scripts-hubs-tr`: Crawl models and metadata from Torch Hub. This hub contains very few models compared to Hugging Face Hub.
-- `scripts-hubs`: Full hub stack (combined set).
+- `scripts-hubs-hf`: Hugging Face metadata retrieval and existing ONNX models; no model export backends.
+- `scripts-hubs-hf-transformers`: Transformers export through Optimum.
+- `scripts-hubs-hf-diffusers`: Diffusers export through Optimum (also requires Transformers through Optimum).
+- `scripts-hubs-hf-timm`: Timm export through Optimum.
+- `scripts-hubs-hf-sentence-transformers`: Sentence Transformers export through Optimum.
+- `scripts-hubs-hf-tensorflow`: Existing Keras/SavedModel/TFLite conversion with TensorFlow 2.15.0; use Python 3.11.
+- `scripts-hubs-hf-sb3`: Stable-Baselines3 conversion.
 - `scripts-bootstrap`: Filter, normalize, post-process, and some other feature engineering on collected DAG datasets.
 - `tools-vs`: Visualize DAGs (Graphviz).
 - `tools`: Full toolset (combined set).
@@ -180,3 +183,60 @@ In GitHub **Actions**, confirm the tag run's `build`, `verify`, `publish`, and
 environment with `pip check` and `younger-logics-ir --help`. Then update the parent
 repository's IR pointer and `releases/current.txt` for the new combination.
 Compatible IR fixes do not require matching version bumps in Younger or DL.
+
+## Hugging Face conversion in separate environments
+
+Install the matching `scripts-hubs-hf-*` extra in each environment in one command
+so pip resolves the backend dependencies together. Install CPU PyTorch separately
+when using Torch Hub.
+
+The Younger kernel and Younger-Logics-IR require Python 3.11 or newer.
+Other Younger components retain their own Python requirements. Use Python 3.11
+for the existing TensorFlow 2.15.0 conversion path.
+
+Create and activate a separate environment for each model library. For example,
+from the parent Younger checkout, prepare a Diffusers environment:
+
+```bash
+python3.11 -m venv .venv-hf-diffusers
+source .venv-hf-diffusers/bin/activate
+python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+python -m pip install -e . -e 'younger/logics/ir[scripts-hubs-hf-diffusers]'
+python -m pip check
+mkdir -p output cache-diffusers
+younger-logics-ir create onnx convert huggingface \
+    --model-infos-filepath ./models.json \
+    --save-dirpath ./output \
+    --cache-dirpath ./cache-diffusers \
+    --framework optimum \
+    --library-name diffusers \
+    --device cpu
+```
+
+The CPU command above uses the PyTorch CPU index for supported platforms; see
+[PyTorch installation instructions](https://pytorch.org/get-started/locally/).
+Select compatible CPU torch/torchvision versions for your environment and retain
+those versions in a constraints file when installing additional dependencies.
+Extras declare required libraries, not a tested lockfile: an isolated Diffusers
+environment still needs compatible Optimum, Transformers, Diffusers and Hub versions.
+
+Use the matching extra and `--library-name transformers`, `timm`, or
+`sentence_transformers` in the other Optimum environments. The option filters
+models using the existing tag priority: sentence-transformers, transformers,
+diffusers, timm. It does not force unrelated models through the selected library.
+`--library-name` is required with `--framework optimum`, including estimate runs.
+Add `--estimate` to count the selected models without exporting them.
+
+For TensorFlow, install `scripts-hubs-hf-tensorflow` in a Python 3.11 environment
+and use `--framework keras` or `--framework tflite`, without `--library-name`.
+For Stable-Baselines3, use its extra and `--framework stable_baselines3`.
+`--library-name` is only valid with `--framework optimum`.
+
+Use a separate `--cache-dirpath` for each environment/run: conversion clears its
+working cache. Optimum status and resume files include the selected library name;
+other frameworks retain their original status filenames. Existing
+combined-run checkpoints are not reused by a library-specific run.
+
+For PyPI installations, Python 3.11 support requires releases of both the kernel
+and IR with the updated Python metadata. Until then, use the source installation
+shown above. Install the matching published extra once those releases are available.

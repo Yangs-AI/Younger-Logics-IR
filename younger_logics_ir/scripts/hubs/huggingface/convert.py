@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2026-10-16 14:47:30
+# Last Modified time: 2026-11-03 21:53:45
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -271,6 +271,7 @@ def safe_sb3_export(model_id: str, sb3_model_path: pathlib.Path, onnx_model_path
         #Bypasses the strict probability distribution check in PyTorch 2.0+ Dynamo 
         #by manually mapping the pure mathematical tensor flow.
         def __init__(self, model):
+            super().__init__()
             self.model_name = model.__class__.__name__
             self.action_space = model.action_space
             self.observation_space = model.observation_space
@@ -589,7 +590,19 @@ def convert_onnx(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpa
     return status, instances, artifacts
 
 
-def get_model_infos_and_convert_method(model_infos_filepath: pathlib.Path, framework: Literal['optimum', 'onnx', 'keras', 'tflite', 'stable_baselines3']) -> tuple[list[dict[str, Any]], Callable[[str, pathlib.Path, pathlib.Path, Literal['cpu', 'cuda']], tuple[dict[str, dict[int, Any] | Literal['system_kill']], list[Instance], list[str]]]]:
+def get_model_library_name(model_info: dict[str, Any]) -> str | None:
+    tags = set(model_info.get('tags', []))
+    return next(
+        (library_name for tag, library_name in [('sentence-transformers', 'sentence_transformers'),
+                                               ('transformers', 'transformers'),
+                                               ('diffusers', 'diffusers'),
+                                               ('timm', 'timm')]
+         if tag in tags),
+        None
+    )
+
+
+def get_model_infos_and_convert_method(model_infos_filepath: pathlib.Path, framework: Literal['optimum', 'onnx', 'keras', 'tflite', 'stable_baselines3'], library_name: str | None = None) -> tuple[list[dict[str, Any]], Callable[[str, pathlib.Path, pathlib.Path, Literal['cpu', 'cuda']], tuple[dict[str, dict[int, Any] | Literal['system_kill']], list[Instance], list[str]]]]:
     # This is the convert order.
     supported_frameworks: list[str] = ['optimum', 'onnx', 'keras', 'tflite', 'stable_baselines3']
     supported_convert_methods: dict[str, Callable[[str, pathlib.Path, pathlib.Path, Literal['cpu', 'cuda'], str | None], tuple[dict[str, dict[int, Any] | Literal['system_kill']], list[Instance], list[str]]]] = dict(
@@ -611,7 +624,8 @@ def get_model_infos_and_convert_method(model_infos_filepath: pathlib.Path, frame
     model_infos: list[dict[str, Any]] = list()
     for model_info in load_json(model_infos_filepath):
         model_frameworks = get_model_frameworks(infer_supported_frameworks(model_info))
-        used_storage = model_info.get('usedStorage', 0)
+        if library_name is not None and get_model_library_name(model_info) != library_name:
+            continue
         if framework in model_frameworks:
             model_infos.append(model_info)
 
@@ -619,14 +633,15 @@ def get_model_infos_and_convert_method(model_infos_filepath: pathlib.Path, frame
     return model_infos, convert_method
 
 
-def get_convert_status_and_last_handled_model_id(sts_cache_dirpath: pathlib.Path, framework: Literal['optimum', 'onnx', 'keras', 'tflite', 'stable_baselines3'], model_size_limit: tuple[int, int]) -> tuple[list[dict[str, dict[int, Any]]], str | None]:
+def get_convert_status_and_last_handled_model_id(sts_cache_dirpath: pathlib.Path, framework: Literal['optimum', 'onnx', 'keras', 'tflite', 'stable_baselines3'], model_size_limit: tuple[int, int], library_name: str | None = None) -> tuple[list[dict[str, dict[int, Any]]], str | None]:
     convert_status: dict[str, dict[int, Any]] = list()
-    specific_status_filepath = sts_cache_dirpath.joinpath(f'{framework}_{model_size_limit[0]}_{model_size_limit[1]}.sts')
+    status_name = framework if library_name is None else f'{framework}_{library_name}'
+    specific_status_filepath = sts_cache_dirpath.joinpath(f'{status_name}_{model_size_limit[0]}_{model_size_limit[1]}.sts')
     if specific_status_filepath.is_file():
         with open(specific_status_filepath, 'r') as specific_status_file:
             convert_status: dict[str, dict[int, Any]] = [loads_json(line.strip()) for line in specific_status_file]
 
-    last_handled_filepath = sts_cache_dirpath.joinpath(f'{framework}_{model_size_limit[0]}_{model_size_limit[1]}_last_handled.sts')
+    last_handled_filepath = sts_cache_dirpath.joinpath(f'{status_name}_{model_size_limit[0]}_{model_size_limit[1]}_last_handled.sts')
     if last_handled_filepath.is_file():
         with open(last_handled_filepath, 'r') as last_handled_file:
             model_id = last_handled_file.read().strip()
@@ -636,13 +651,14 @@ def get_convert_status_and_last_handled_model_id(sts_cache_dirpath: pathlib.Path
     return convert_status, last_handled_model_id
 
 
-def set_convert_status_last_handled_model_id(sts_cache_dirpath: pathlib.Path, framework: Literal['optimum', 'onnx', 'keras', 'tflite', 'stable_baselines3'], model_size_limit: tuple[int, int], convert_status: dict[str, dict[str, Any]], model_id: str):
+def set_convert_status_last_handled_model_id(sts_cache_dirpath: pathlib.Path, framework: Literal['optimum', 'onnx', 'keras', 'tflite', 'stable_baselines3'], model_size_limit: tuple[int, int], convert_status: dict[str, dict[str, Any]], model_id: str, library_name: str | None = None):
     # TODO: The typing notation of the convert_status should be revised in future.
-    convert_status_filepath = sts_cache_dirpath.joinpath(f'{framework}_{model_size_limit[0]}_{model_size_limit[1]}.sts')
+    status_name = framework if library_name is None else f'{framework}_{library_name}'
+    convert_status_filepath = sts_cache_dirpath.joinpath(f'{status_name}_{model_size_limit[0]}_{model_size_limit[1]}.sts')
     with open(convert_status_filepath, 'a') as convert_status_file:
         convert_status_file.write(f'{saves_json((model_id, convert_status))}\n')
 
-    last_handled_filepath = sts_cache_dirpath.joinpath(f'{framework}_{model_size_limit[0]}_{model_size_limit[1]}_last_handled.sts')
+    last_handled_filepath = sts_cache_dirpath.joinpath(f'{status_name}_{model_size_limit[0]}_{model_size_limit[1]}_last_handled.sts')
     with open(last_handled_filepath, 'w') as last_handled_file:
         last_handled_file.write(f'{model_id}\n')
 
@@ -656,6 +672,7 @@ def main(
     model_size_limit_r: int | None = None,
     token: str | None = None,
     estimate: bool = False,
+    library_name: Literal['transformers', 'diffusers', 'timm', 'sentence_transformers'] | None = None,
 ):
     """
     Retrieve Metadata of HuggingFace Models and Save Them Into Files.
@@ -670,6 +687,7 @@ def main(
     :type device: Literal[&#39;cpu&#39;, &#39;cuda&#39;], optional
     :param framework: _description_, defaults to 'optimum'
     :type framework: Literal[&#39;optimum&#39;, &#39;onnx&#39;, &#39;keras&#39;, &#39;tflite&#39;], optional
+    :param library_name: Required for optimum; only convert models belonging to this library.
     :param model_size_limit_l: _description_, defaults to None
     :type model_size_limit_l: int | None, optional
     :param model_size_limit_r: _description_, defaults to None
@@ -691,6 +709,14 @@ def main(
 
     """
 
+    if framework == 'optimum' and library_name is None:
+        raise ValueError('library_name is required when framework is optimum.')
+    if library_name is not None:
+        if framework != 'optimum':
+            raise ValueError('library_name is only available when framework is optimum.')
+        if library_name not in {'transformers', 'diffusers', 'timm', 'sentence_transformers'}:
+            raise ValueError(f'Unsupported library_name: {library_name}')
+
     model_size_limit_l = model_size_limit_l or 0
     logger.info(f'   Model Size Left Limit: {get_human_readable_size_representation(model_size_limit_l)}.')
 
@@ -699,7 +725,7 @@ def main(
 
     model_size_limit = (model_size_limit_l, model_size_limit_r)
 
-    model_infos, convert_method = get_model_infos_and_convert_method(model_infos_filepath, framework)
+    model_infos, convert_method = get_model_infos_and_convert_method(model_infos_filepath, framework, library_name=library_name)
     if estimate:
         logger.info(f'Only Estimate. Models To Be Converted: {len(model_infos)}; Model Infos Filename: {model_infos_filepath.name}.')
         return
@@ -723,7 +749,7 @@ def main(
     # Status
     sts_cache_dirpath = cache_dirpath.joinpath(f'Cache-HFSts')
     create_dir(sts_cache_dirpath)
-    convert_status, last_handled_model_id = get_convert_status_and_last_handled_model_id(sts_cache_dirpath, framework, model_size_limit)
+    convert_status, last_handled_model_id = get_convert_status_and_last_handled_model_id(sts_cache_dirpath, framework, model_size_limit, library_name=library_name)
     number_of_converted_models = len(convert_status)
     logger.info(f'-> Previous Converted Models: {number_of_converted_models}')
 
@@ -739,20 +765,7 @@ def main(
             model_id = model_info['id']
             possible_model_size = get_huggingface_hub_model_storage(model_id, token=token)
             if model_size_limit_l <= possible_model_size and possible_model_size <= model_size_limit_r:
-                if framework == 'optimum':
-                    #Selecting a matched library from tags when the framework of module is optimum
-                    tags = set(model_info.get('tags', []))
-                    library_name = next(
-                        (lib for tag, lib in [('sentence-transformers','sentence_transformers'),
-                                            ('transformers','transformers'),
-                                            ('diffusers','diffusers'),
-                                            ('timm','timm')]
-                        if tag in tags),
-                        None
-                    )
-                else:
-                    #Other frameworks do not need library_name
-                    library_name = None
+                model_library_name = get_model_library_name(model_info) if framework == 'optimum' else None
                 if last_handled_model_id is not None:
                     if model_id == last_handled_model_id:
                         last_handled_model_id = None
@@ -760,7 +773,7 @@ def main(
                     progress_bar.update(1)
                     continue
 
-                status, instances, artifacts = convert_method(model_id, cvt_cache_dirpath, ofc_cache_dirpath, device, library_name=library_name)
+                status, instances, artifacts = convert_method(model_id, cvt_cache_dirpath, ofc_cache_dirpath, device, library_name=model_library_name)
 
                 model_owner, model_name = model_id.split('/')
                 for index, (instance, artifact) in enumerate(zip(instances, artifacts), start=1):
@@ -789,7 +802,7 @@ def main(
             else:
                 status = dict(special_status='size_limit')
 
-            set_convert_status_last_handled_model_id(sts_cache_dirpath, framework, model_size_limit, status, model_id)
+            set_convert_status_last_handled_model_id(sts_cache_dirpath, framework, model_size_limit, status, model_id, library_name=library_name)
             clean_cache(model_id, cvt_cache_dirpath, ofc_cache_dirpath)
 
             progress_bar.set_description(f'Convert - {model_id}')

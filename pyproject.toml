@@ -11,7 +11,7 @@ name = "Younger-Logics-IR"
 description = "Provides a Unified Intermediate Representation For Neural Networks, Enabling Framework-Agnostic Analysis, Conversion, and Optimization."
 version = "0.1.0"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 keywords = ["Younger", "Logic", "Deep Learning", "DAG", "Intermediate Representation"]
@@ -28,6 +28,7 @@ classifiers=[
     'Operating System :: OS Independent',
 
     'Programming Language :: Python :: 3',
+    'Programming Language :: Python :: 3.11',
     'Programming Language :: Python :: 3.12',
     "Programming Language :: Python :: 3 :: Only",
 ]
@@ -41,10 +42,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-scripts-hubs-hf = ["huggingface_hub", "torch", "tf2onnx", "optimum-onnx[onnxruntime]", "transformers", "diffusers[torch]", "sentence-transformers", "timm", "stable-baselines3[extra]"]
-scripts-hubs-ox = []
-scripts-hubs-tr = ["torch", "torchvision"]
-scripts-hubs = ["numpy", "pandas", "isocodes", "huggingface_hub", "tf2onnx", "optimum-onnx[onnxruntime]", "transformers", "diffusers[torch]", "sentence-transformers", "timm", "torch", "torchvision", "stable-baselines3[extra]"]
+scripts-hubs-hf = ["huggingface_hub"]
+scripts-hubs-hf-transformers = ["huggingface_hub", "torch", "optimum-onnx[onnxruntime]", "transformers"]
+scripts-hubs-hf-diffusers = ["huggingface_hub", "torch", "optimum-onnx[onnxruntime]", "diffusers[torch]"]
+scripts-hubs-hf-timm = ["huggingface_hub", "torch", "optimum-onnx[onnxruntime]", "timm"]
+scripts-hubs-hf-sentence-transformers = ["huggingface_hub", "torch", "optimum-onnx[onnxruntime]", "sentence-transformers"]
+scripts-hubs-hf-tensorflow = ["huggingface_hub", "tensorflow==2.15.0", "tf2onnx"]
+scripts-hubs-hf-sb3 = ["huggingface_hub", "torch", "stable-baselines3[extra]"]
 
 scripts-bootstrap = ["numpy", "pandas", "scipy", "scikit-learn", "umap", "seaborn", "matplotlib", "hdbscan"]
 

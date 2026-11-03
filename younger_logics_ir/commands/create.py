@@ -123,6 +123,7 @@ def create_onnx_convert():
 @click.option('--cache-dirpath',        required=True,  type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=pathlib.Path), help='Cache directory, where data is volatile.')
 @click.option('--device',               required=False, type=click.Choice(['cpu', 'cuda'], case_sensitive=True), default='cpu', help='Used to indicate whether to use GPU or CPU when converting models.')
 @click.option('--framework',            required=False, type=click.Choice(['optimum', 'onnx', 'keras', 'tflite', 'stable_baselines3'], case_sensitive=True), default='optimum', help='Indicates the framework to which the model belonged prior to conversion.')
+@click.option('--library-name',         required=False, type=click.Choice(['transformers', 'diffusers', 'timm', 'sentence_transformers'], case_sensitive=True), default=None, help='Only convert models belonging to this library. Required with --framework optimum; unavailable with other frameworks.')
 @click.option('--model-size-limit-l',   required=False, type=int, default=None, help='Used to filter out oversized models to prevent process interruptions due to excessive storage usage. (Note: The storage space occupied by models is a simple estimation and may have inaccuracies. Please use with caution.)')
 @click.option('--model-size-limit-r',   required=False, type=int, default=None, help='Used to filter out oversized models to prevent process interruptions due to excessive storage usage. (Note: The storage space occupied by models is a simple estimation and may have inaccuracies. Please use with caution.)')
 @click.option('--token',                required=False, type=str, default=None, help='The HuggingFace token, which requires registering an account on HuggingFace and manually setting the access token. If None, retrieve without HuggingFace access token.')
@@ -131,14 +132,19 @@ def create_onnx_convert():
 def create_onnx_convert_huggingface(
     model_infos_filepath,
     save_dirpath, cache_dirpath,
-    device, framework, model_size_limit_l, model_size_limit_r, token, estimate,
+    device, framework, library_name, model_size_limit_l, model_size_limit_r, token, estimate,
     logging_filepath
 ):
     equip_logger(logging_filepath=logging_filepath)
 
+    if framework == 'optimum' and library_name is None:
+        raise click.BadParameter('Required with --framework optimum.', param_hint='--library-name')
+    if library_name is not None and framework != 'optimum':
+        raise click.BadParameter('Only available with --framework optimum.', param_hint='--library-name')
+
     from younger_logics_ir.scripts.hubs.huggingface import convert
 
-    convert.main(model_infos_filepath, save_dirpath, cache_dirpath, device=device, framework=framework, model_size_limit_l=model_size_limit_l, model_size_limit_r=model_size_limit_r, token=token, estimate=estimate)
+    convert.main(model_infos_filepath, save_dirpath, cache_dirpath, device=device, framework=framework, library_name=library_name, model_size_limit_l=model_size_limit_l, model_size_limit_r=model_size_limit_r, token=token, estimate=estimate)
 
 
 @create_onnx_convert.command(name='onnx')
