@@ -298,3 +298,25 @@ file formats can appear in several framework groups. Unrecognized routes use
 size limit. Their filenames are recorded in `jobs.json`. These records require inspection.
 Routing does not guarantee successful export. `--number-per-file` limits model
 count, not conversion time or memory.
+
+## Hugging Face conversion output
+
+Instances are stored by model, conversion framework and requested ONNX opset:
+
+```text
+Instances/<owner>/<model>/
+    README.md
+    <framework>/opset_<version>/<instance_unique>/
+        meta
+        logicx.bin
+        labels.lbl
+        conversion.json
+```
+
+`conversion.json` records the model ID, framework, library, artifact, requested
+`opset_version`, and actual ONNX `opset_import` by domain. The latter is also
+stored in the LogicX graph. Requested and actual versions are recorded separately
+because exporters may select a different opset. README content is saved as Markdown
+once per model. Dataset traversal must descend into the model/framework/opset
+folders to find Instance directories. Existing outputs and resume records are
+not migrated; use a fresh conversion cache when regenerating the new layout.
