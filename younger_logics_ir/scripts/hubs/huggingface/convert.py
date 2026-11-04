@@ -671,9 +671,9 @@ def main(
     :type framework: Literal[&#39;optimum&#39;, &#39;onnx&#39;, &#39;keras&#39;, &#39;tflite&#39;], optional
     :param verbose: Show Optimum worker output, including model download progress.
     :param library_name: Required for optimum; only convert models belonging to this library.
-    :param model_size_limit_l: _description_, defaults to None
+    :param model_size_limit_l: Inclusive lower size limit in bytes, defaults to None
     :type model_size_limit_l: int | None, optional
-    :param model_size_limit_r: _description_, defaults to None
+    :param model_size_limit_r: Inclusive upper size limit in bytes, defaults to None
     :type model_size_limit_r: int | None, optional
     :param token: _description_, defaults to None
     :type token: str | None, optional
@@ -701,10 +701,10 @@ def main(
         if library_name not in {'transformers', 'diffusers', 'timm', 'sentence_transformers'}:
             raise ValueError(f'Unsupported library_name: {library_name}')
 
-    model_size_limit_l = model_size_limit_l or 0
+    model_size_limit_l = 0 if model_size_limit_l is None else model_size_limit_l
     logger.info(f'   Model Size Left Limit: {get_human_readable_size_representation(model_size_limit_l)}.')
 
-    model_size_limit_r = model_size_limit_r or 1024 * 1024 * 1024 * 1024 * 1024
+    model_size_limit_r = 1024 ** 5 if model_size_limit_r is None else model_size_limit_r
     logger.info(f'   Model Size Right Limit: {get_human_readable_size_representation(model_size_limit_r)}.')
 
     model_size_limit = (model_size_limit_l, model_size_limit_r)

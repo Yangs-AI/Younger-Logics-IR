@@ -15,6 +15,7 @@
 
 
 import click
+import math
 import pathlib
 
 from younger_logics_ir.commons.logging import equip_logger
@@ -147,8 +148,8 @@ def create_onnx_convert():
 @click.option('--device',               required=False, type=click.Choice(['cpu', 'cuda'], case_sensitive=True), default='cpu', help='Used to indicate whether to use GPU or CPU when converting models.')
 @click.option('--framework',            required=False, type=click.Choice(['optimum', 'onnx', 'keras', 'tflite', 'stable_baselines3'], case_sensitive=True), default='optimum', help='Indicates the framework to which the model belonged prior to conversion.')
 @click.option('--library-name',         required=False, type=click.Choice(['transformers', 'diffusers', 'timm', 'sentence_transformers'], case_sensitive=True), default=None, help='Only convert models belonging to this library. Required with --framework optimum; unavailable with other frameworks.')
-@click.option('--model-size-limit-l',   required=False, type=int, default=None, help='Used to filter out oversized models to prevent process interruptions due to excessive storage usage. (Note: The storage space occupied by models is a simple estimation and may have inaccuracies. Please use with caution.)')
-@click.option('--model-size-limit-r',   required=False, type=int, default=None, help='Used to filter out oversized models to prevent process interruptions due to excessive storage usage. (Note: The storage space occupied by models is a simple estimation and may have inaccuracies. Please use with caution.)')
+@click.option('--model-size-limit-l',   required=False, type=click.FloatRange(min=0), default=None, help='Inclusive lower model size limit in GB (1024^3 bytes); accepts decimals, e.g. 0.5 or 3.')
+@click.option('--model-size-limit-r',   required=False, type=click.FloatRange(min=0), default=None, help='Inclusive upper model size limit in GB (1024^3 bytes); accepts decimals, e.g. 0.5 or 3.')
 @click.option('--token',                required=False, type=str, default=None, help='The HuggingFace token, which requires registering an account on HuggingFace and manually setting the access token. If None, retrieve without HuggingFace access token.')
 @click.option('--verbose',              is_flag=True,   help='Show Optimum worker output, including model download progress.')
 @click.option('--estimate',             is_flag=True,   help='Use to estimate models will be converted. No Conversion Processes.')
@@ -165,6 +166,14 @@ def create_onnx_convert_huggingface(
         raise click.BadParameter('Required with --framework optimum.', param_hint='--library-name')
     if library_name is not None and framework != 'optimum':
         raise click.BadParameter('Only available with --framework optimum.', param_hint='--library-name')
+
+    for limit in (model_size_limit_l, model_size_limit_r):
+        if limit is not None and not math.isfinite(limit):
+            raise click.BadParameter('Model size limits must be finite numbers.')
+    if model_size_limit_l is not None and model_size_limit_r is not None and model_size_limit_l > model_size_limit_r:
+        raise click.BadParameter('The lower model size limit must not exceed the upper limit.')
+    model_size_limit_l = int(model_size_limit_l * 1024 ** 3) if model_size_limit_l is not None else None
+    model_size_limit_r = int(model_size_limit_r * 1024 ** 3) if model_size_limit_r is not None else None
 
     from younger_logics_ir.scripts.hubs.huggingface import convert
 

@@ -320,3 +320,12 @@ because exporters may select a different opset. README content is saved as Markd
 once per model. Dataset traversal must descend into the model/framework/opset
 folders to find Instance directories. Existing outputs and resume records are
 not migrated; use a fresh conversion cache when regenerating the new layout.
+
+### Conversion model size limits
+
+CLI options `--model-size-limit-l` and `--model-size-limit-r` accept sizes in GB
+(using 1024^3 bytes, i.e. GiB), including decimals. For example,
+`--model-size-limit-l 0.5 --model-size-limit-r 3` selects estimated model storage
+sizes from 0.5 to 3 GB, inclusive. These CLI values are not byte counts.
+The Python conversion API continues to accept bytes. Omit an option to use its
+default bound; an explicit upper limit of zero remains zero.
