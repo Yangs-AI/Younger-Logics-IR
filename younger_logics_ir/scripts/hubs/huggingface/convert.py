@@ -15,11 +15,9 @@
 
 
 import os
-import sys
 import onnx
 import tqdm
 import pathlib
-import traceback
 import multiprocessing
 
 from typing import Any, Literal, Callable
@@ -333,7 +331,7 @@ def safe_sb3_export(model_id: str, sb3_model_path: pathlib.Path, onnx_model_path
         this_status = 'success'
     except Exception as exception:
         this_status = 'convert_error'
-        logger.error(f"\nFail. {model_id} Caused by：\n{traceback.format_exc()}\n", file=sys.stderr)
+        logger.exception(f'Fail to export SB3 model: {model_id}')
     finally:
         results_queue.put(this_status)
 
