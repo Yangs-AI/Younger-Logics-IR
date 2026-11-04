@@ -178,14 +178,15 @@ def convert_optimum(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_di
             this_status, this_error = results_queue.get()
             if this_status == 'success':
                 for filepath in cvt_cache_dirpath.rglob('*.onnx'):
+                    artifact = filepath.relative_to(cvt_cache_dirpath).as_posix()
                     try:
                         instance = Instance()
                         instance.setup_logicx(convert(load_model(filepath)))
                         instances.append(instance)
-                        artifacts.append((str(filepath.relative_to(cvt_cache_dirpath)), onnx_opset_version))
-                        this_status_details[str(filepath)] = 'success'
+                        artifacts.append((artifact, onnx_opset_version))
+                        this_status_details[artifact] = 'success'
                     except Exception as exception:
-                        this_status_details[str(filepath)] = 'logicx_error'
+                        this_status_details[artifact] = 'logicx_error'
 
         if this_status == 'access_deny':
             # jump out of the opset loop if Repository can not found
@@ -351,15 +352,14 @@ def convert_sb3(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpat
     opset_versions = [v for v in get_onnx_opset_versions() if 14 <= v and v <= _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET]
 
     for remote_sb3_model_path in remote_sb3_model_paths:
-        remote_sb3_model_name = os.path.splitext(remote_sb3_model_path)[0]
 
         try:
             sb3_model_path = pathlib.Path(hf_hub_download(model_id, remote_sb3_model_path, cache_dir=ofc_cache_dirpath))
         except Exception as exception:
-            status[remote_sb3_model_name] = 'access_deny'
+            status[remote_sb3_model_path] = 'access_deny'
             continue
 
-        status[remote_sb3_model_name] = dict()
+        status[remote_sb3_model_path] = dict()
         onnx_model_path = cvt_cache_dirpath.joinpath(f'{hash_string(str(sb3_model_path))}.onnx')
         for onnx_opset_version in opset_versions:
             results_queue = multiprocessing.Queue()
@@ -376,11 +376,11 @@ def convert_sb3(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpat
                         instance = Instance()
                         instance.setup_logicx(convert(load_model(pathlib.Path(onnx_model_path))))
                         instances.append(instance)
-                        artifacts.append((f'{remote_sb3_model_name}', onnx_opset_version))
+                        artifacts.append((remote_sb3_model_path, onnx_opset_version))
                     except Exception:
                         this_status = 'logicx_error'
 
-            status[remote_sb3_model_name][onnx_opset_version] = this_status
+            status[remote_sb3_model_path][onnx_opset_version] = this_status
 
     clean_cache(model_id, cvt_cache_dirpath, ofc_cache_dirpath)
     return status, instances, artifacts
@@ -416,7 +416,7 @@ def convert_keras(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirp
     remote_keras_model_paths = list(set(remote_keras_model_paths))
 
     for remote_keras_model_path, path_type in remote_keras_model_paths:
-        remote_keras_model_name = os.path.splitext(remote_keras_model_path)[0]
+        artifact = remote_keras_model_path or '.'
         try:
             if path_type == 'D':
                 allowed_pattern = '*' if remote_keras_model_path == '' else f'{remote_keras_model_path}/*'
@@ -424,10 +424,10 @@ def convert_keras(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirp
             if path_type == 'F':
                 keras_model_path = pathlib.Path(hf_hub_download(model_id, remote_keras_model_path, cache_dir=ofc_cache_dirpath))
         except Exception as exception:
-            status[remote_keras_model_name] = 'access_deny'
+            status[artifact] = 'access_deny'
             continue
 
-        status[remote_keras_model_name] = dict()
+        status[artifact] = dict()
         onnx_model_path = cvt_cache_dirpath.joinpath(f'{hash_string(str(keras_model_path))}.onnx')
         for onnx_opset_version in get_onnx_opset_versions():
             # tf2onnx only support 14 - 18 opset version
@@ -447,10 +447,10 @@ def convert_keras(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirp
                         instance = Instance()
                         instance.setup_logicx(convert(load_model(onnx_model_path)))
                         instances.append(instance)
-                        artifacts.append((f'{remote_keras_model_path}', onnx_opset_version))
+                        artifacts.append((artifact, onnx_opset_version))
                     except Exception as exception:
                         this_status = 'logicx_error'
-            status[remote_keras_model_name][onnx_opset_version] = this_status
+            status[artifact][onnx_opset_version] = this_status
 
     clean_cache(model_id, cvt_cache_dirpath, ofc_cache_dirpath)
     return status, instances, artifacts
@@ -474,14 +474,13 @@ def convert_tflite(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dir
     artifacts: list[tuple[str, int]] = list()
     remote_tflite_model_paths = get_huggingface_hub_model_siblings(model_id, suffixes=['.tflite'])
     for remote_tflite_model_path in remote_tflite_model_paths:
-        remote_tflite_model_name = os.path.splitext(remote_tflite_model_path)[0]
         try:
             tflite_model_path = pathlib.Path(hf_hub_download(model_id, remote_tflite_model_path, cache_dir=ofc_cache_dirpath))
         except Exception as exception:
-            status[remote_tflite_model_name] = 'access_deny'
+            status[remote_tflite_model_path] = 'access_deny'
             continue
 
-        status[remote_tflite_model_name] = dict()
+        status[remote_tflite_model_path] = dict()
         onnx_model_path = cvt_cache_dirpath.joinpath(f'{hash_string(str(tflite_model_path))}.onnx')
         for onnx_opset_version in get_onnx_opset_versions():
             # tf2onnx only support 14 - 18 opset version
@@ -500,11 +499,11 @@ def convert_tflite(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dir
                         instance = Instance()
                         instance.setup_logicx(convert(load_model(onnx_model_path)))
                         instances.append(instance)
-                        artifacts.append((f'{remote_tflite_model_name}', onnx_opset_version))
+                        artifacts.append((remote_tflite_model_path, onnx_opset_version))
                     except Exception as exception:
                         this_status = 'logicx_error'
 
-            status[remote_tflite_model_name][onnx_opset_version] = this_status
+            status[remote_tflite_model_path][onnx_opset_version] = this_status
 
     clean_cache(model_id, cvt_cache_dirpath, ofc_cache_dirpath)
     return status, instances, artifacts
@@ -528,25 +527,24 @@ def convert_onnx(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpa
     artifacts: list[tuple[str, int]] = list()
     remote_onnx_model_paths = get_huggingface_hub_model_siblings(model_id, suffixes=['.onnx'])
     for remote_onnx_model_path in remote_onnx_model_paths:
-        remote_onnx_model_name = os.path.splitext(remote_onnx_model_path)[0]
         try:
             onnx_model_path = pathlib.Path(hf_hub_download(model_id, remote_onnx_model_path, cache_dir=ofc_cache_dirpath))
         except Exception as exception:
-            status[remote_onnx_model_name] = 'access_deny'
+            status[remote_onnx_model_path] = 'access_deny'
             continue
 
-        status[remote_onnx_model_name] = dict()
+        status[remote_onnx_model_path] = dict()
 
         try:
             onnx_model = load_model(onnx_model_path)
         except Exception as exception:
-            status[remote_onnx_model_name] = 'onnx_load_error'
+            status[remote_onnx_model_path] = 'onnx_load_error'
             continue
 
         try:
             onnx_model_opset_version = get_onnx_model_opset_version(onnx_model)
         except Exception as exception:
-            status[remote_onnx_model_name] = 'onnx_opset_error'
+            status[remote_onnx_model_path] = 'onnx_opset_error'
             continue
 
         for onnx_opset_version in get_onnx_opset_versions():
@@ -556,7 +554,7 @@ def convert_onnx(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpa
                     instance = Instance()
                     instance.setup_logicx(convert(onnx_model))
                     instances.append(instance)
-                    artifacts.append((f'{remote_onnx_model_name}', onnx_opset_version))
+                    artifacts.append((remote_onnx_model_path, onnx_opset_version))
                 except Exception as exception:
                     this_status = 'logicx_error'
             else:
@@ -574,10 +572,10 @@ def convert_onnx(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpa
                             instance = Instance()
                             instance.setup_logicx(convert(load_model(other_version_onnx_model_path)))
                             instances.append(instance)
-                            artifacts.append((f'{remote_onnx_model_name}', onnx_opset_version))
+                            artifacts.append((remote_onnx_model_path, onnx_opset_version))
                         except Exception as exception:
                             this_status = 'logicx_error'
-            status[remote_onnx_model_name][onnx_opset_version] = this_status
+            status[remote_onnx_model_path][onnx_opset_version] = this_status
 
     clean_cache(model_id, cvt_cache_dirpath, ofc_cache_dirpath)
     return status, instances, artifacts
@@ -760,7 +758,7 @@ def main(
 
                 model_owner, model_name = model_id.split('/')
                 model_dirpath = instances_dirpath.joinpath(model_owner, model_name)
-                create_dir(model_dirpath)
+                saved_instances = 0
                 for index, (instance, (artifact, onnx_opset_version)) in enumerate(zip(instances, artifacts), start=1):
                     instance.insert_label(
                         Implementation(
@@ -783,18 +781,20 @@ def main(
                             ),
                             instance_dirpath.joinpath('conversion.json'), indent=2
                         )
+                        saved_instances += 1
                     except FileExistsError as exception:
                         logger.warning(f'-> Skip! Instance Already Exists: {instance_unique}')
 
-                try:
-                    readme = get_huggingface_hub_model_readme(model_id, token=token)
-                except Exception as exception:
-                    readme = ''
+                if saved_instances:
+                    try:
+                        readme = get_huggingface_hub_model_readme(model_id, token=token)
+                    except Exception as exception:
+                        readme = ''
 
-                if readme == '':
-                    pass
-                else:
-                    model_dirpath.joinpath('README.md').write_text(readme, encoding='utf-8')
+                    if readme == '':
+                        pass
+                    else:
+                        model_dirpath.joinpath('README.md').write_text(readme, encoding='utf-8')
             else:
                 status = dict(special_status='size_limit')
 
