@@ -243,3 +243,58 @@ combined-run checkpoints are not reused by a library-specific run.
 For PyPI installations, Python 3.11 support requires releases of both the kernel
 and IR with the updated Python metadata. Until then, use the source installation
 shown above. Install the matching published extra once those releases are available.
+
+## Prepare Hugging Face conversion jobs
+
+Read all `*.json` files directly inside a Model_Infos directory, filter by
+`lastModified`, and sort each conversion group in ascending date order before
+splitting. Use an empty output directory:
+
+```bash
+mkdir -p jobs-2026
+younger-logics-ir create onnx prepare huggingface \
+    --model-infos-dirpath ./model-infos \
+    --save-dirpath ./jobs-2026 \
+    --date-l 2026-01-01 \
+    --date-r 2027-01-01 \
+    --number-per-file 1000
+```
+
+Dates must use `YYYY-MM-DD` and represent 00:00 UTC on that day. `date_l` is
+inclusive and `date_r` is exclusive; either may be omitted for an open bound.
+Equal dates are ordered by model ID. Identical duplicate records are deduplicated;
+conflicting records for the same ID are rejected. Input JSON files are loaded one at a time.
+SQLite stores the full dataset for deduplication and sorting; output records are
+loaded and saved one shard at a time. `--number-per-file` is required and must be
+positive. Memory use depends on the largest input file, output shard size and
+job manifest, rather than all model records. Reserve disk space for the database
+and output files; the temporary database is removed when preparation exits.
+The input directory should contain only Model_Infos JSON lists.
+
+Shard filenames contain framework, library name, date bounds
+in `YYYY-MM-DD` format, and a zero-based index, for example:
+
+```text
+optimum_diffusers_2026-01-01_2027-01-01_00000.json
+optimum_diffusers_2026-02-03_2026-11-04_00000.json
+```
+
+The library name is omitted when absent. An omitted date bound is named using
+the minimum or maximum valid UTC `lastModified` date across the input directory.
+These inferred dates describe the input data and do not impose additional filters;
+models on the maximum date are included. Explicit `date_r` remains exclusive.
+For example, explicit bounds 2026-01-01 to 2027-01-01 cover all of 2026.
+Shards are written directly
+into the output directory. `jobs.json` records their paths, frameworks, libraries
+and counts. Each shard preserves the original model records and can be passed to
+conversion's `--model-infos-filepath`. Use a separate conversion cache directory
+for every shard/server to keep resume files independent.
+
+No framework or library input is needed: all groups identified by the existing
+conversion tag/file rules are output. Models supporting several
+file formats can appear in several framework groups. Unrecognized routes use
+`unknown` in the filename; missing or invalid dates are saved in
+`missing_dates_00000.json`, etc., outside the job list, using the same shard
+size limit. Their filenames are recorded in `jobs.json`. These records require inspection.
+Routing does not guarantee successful export. `--number-per-file` limits model
+count, not conversion time or memory.

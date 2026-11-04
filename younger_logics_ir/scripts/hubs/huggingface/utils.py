@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2026-09-09 11:37:47
+# Last Modified time: 2026-11-04 16:12:33
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -539,13 +539,25 @@ def extract_possible_metrics_from_readme(readme: str) -> dict[str, list[str] | l
 ##############################################################################################
 
 
+def get_model_library_name(model_info: dict[str, Any]) -> str | None:
+    tags = set(model_info.get('tags') or [])
+    return next(
+        (library_name for tag, library_name in [('sentence-transformers', 'sentence_transformers'),
+                                               ('transformers', 'transformers'),
+                                               ('diffusers', 'diffusers'),
+                                               ('timm', 'timm')]
+         if tag in tags),
+        None
+    )
+
+
 def infer_supported_frameworks(model_info: dict) -> list[Literal['optimum', 'onnx', 'keras', 'tflite', 'stable_baselines3']]:
     all_supported_frameworks = set(['optimum', 'onnx', 'keras', 'tflite', 'stable_baselines3'])
     all_supported_tags = set(['transformers', 'diffusers', 'timm', 'sentence-transformers', 'stable-baselines3'])
     frameworks = set([])
-    tags = set(model_info['tags'])
+    tags = set(model_info.get('tags') or [])
     if len(tags & all_supported_tags) == 0:
-        for sibling in model_info['siblings']:
+        for sibling in model_info.get('siblings') or []:
             filename = pathlib.Path(sibling['rfilename'])
             if filename.suffix in ['.keras', '.hdf5', '.h5', '.pbtxt', '.pb']:
                 frameworks.add('keras')

@@ -112,6 +112,29 @@ def create_onnx_retrieve_torch(
     retrieve.main(mode, save_dirpath, **kwargs)
 
 
+@create_onnx.group(name='prepare')
+def create_onnx_prepare():
+    pass
+
+
+@create_onnx_prepare.command(name='huggingface')
+@click.option('--model-infos-dirpath', required=True, type=click.Path(exists=True, file_okay=False, path_type=pathlib.Path), help='Directory containing Model_Infos JSON files.')
+@click.option('--save-dirpath', required=True, type=click.Path(exists=True, file_okay=False, path_type=pathlib.Path), help='Empty directory for prepared model lists.')
+@click.option('--date-l', required=False, type=str, default=None, help='Inclusive lower lastModified date: YYYY-MM-DD, UTC midnight.')
+@click.option('--date-r', required=False, type=str, default=None, help='Exclusive upper lastModified date: YYYY-MM-DD, UTC midnight.')
+@click.option('--number-per-file', required=True, type=click.IntRange(min=1), help='Maximum models per prepared file.')
+@click.option('--logging-filepath', required=False, type=click.Path(file_okay=True, dir_okay=False, path_type=pathlib.Path), default=None, help='Path to the log file.')
+def create_onnx_prepare_huggingface(model_infos_dirpath, save_dirpath, date_l, date_r, number_per_file, logging_filepath):
+    equip_logger(logging_filepath=logging_filepath)
+
+    from younger_logics_ir.scripts.hubs.huggingface import prepare
+
+    try:
+        prepare.main(model_infos_dirpath, save_dirpath, date_l=date_l, date_r=date_r, number_per_file=number_per_file)
+    except ValueError as exception:
+        raise click.ClickException(str(exception)) from exception
+
+
 @create_onnx.group(name='convert')
 def create_onnx_convert():
     pass

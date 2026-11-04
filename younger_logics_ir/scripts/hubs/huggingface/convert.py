@@ -38,7 +38,7 @@ from younger_logics_ir.commons.constants import YLIROriginHub
 
 from younger_logics_ir.scripts.commons.utils import get_onnx_opset_versions, get_onnx_model_opset_version
 
-from .utils import get_huggingface_hub_model_readme, get_huggingface_hub_model_siblings, clean_huggingface_hub_model_cache, infer_supported_frameworks, is_permanent_error, get_minimum_opset_from_error, get_huggingface_hub_model_storage
+from .utils import get_model_library_name, get_huggingface_hub_model_readme, get_huggingface_hub_model_siblings, clean_huggingface_hub_model_cache, infer_supported_frameworks, is_permanent_error, get_minimum_opset_from_error, get_huggingface_hub_model_storage
 
 
 def clean_cache(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path):
@@ -580,18 +580,6 @@ def convert_onnx(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpa
 
     clean_cache(model_id, cvt_cache_dirpath, ofc_cache_dirpath)
     return status, instances, artifacts
-
-
-def get_model_library_name(model_info: dict[str, Any]) -> str | None:
-    tags = set(model_info.get('tags', []))
-    return next(
-        (library_name for tag, library_name in [('sentence-transformers', 'sentence_transformers'),
-                                               ('transformers', 'transformers'),
-                                               ('diffusers', 'diffusers'),
-                                               ('timm', 'timm')]
-         if tag in tags),
-        None
-    )
 
 
 def get_model_infos_and_convert_method(model_infos_filepath: pathlib.Path, framework: Literal['optimum', 'onnx', 'keras', 'tflite', 'stable_baselines3'], library_name: str | None = None) -> tuple[list[dict[str, Any]], Callable[[str, pathlib.Path, pathlib.Path, Literal['cpu', 'cuda']], tuple[dict[str, dict[int, Any] | Literal['system_kill']], list[Instance], list[str]]]]:
