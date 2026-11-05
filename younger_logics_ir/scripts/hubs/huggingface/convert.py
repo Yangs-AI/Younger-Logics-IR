@@ -8,13 +8,15 @@
 # Last Modified by: Jason Young (杨郑鑫)
 # Last Modified time: 2026-11-04 20:29:01
 # Copyright (c) 2024 Yangs.AI
-# 
+#
 # This source code is licensed under the Apache License 2.0 found in the
 # LICENSE file in the root directory of this source tree.
 ########################################################################
 
 
 import os
+import sys
+import contextlib
 import onnx
 import tqdm
 import pathlib
@@ -42,6 +44,30 @@ from .utils import get_model_library_name, get_huggingface_hub_model_readme, get
 def clean_cache(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path):
     delete_dir(cvt_cache_dirpath, only_clean=True)
     clean_huggingface_hub_model_cache(model_id, ofc_cache_dirpath)
+
+
+@contextlib.contextmanager
+def export_output(verbose: bool):
+    saved_fds = {}
+    try:
+        if not verbose:
+            sys.stdout.flush()
+            sys.stderr.flush()
+            with open(os.devnull, 'w') as devnull:
+                for fd in (1, 2):
+                    saved_fds[fd] = os.dup(fd)
+                    os.dup2(devnull.fileno(), fd)
+        yield
+    finally:
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+        finally:
+            for fd, saved in saved_fds.items():
+                try:
+                    os.dup2(saved, fd)
+                finally:
+                    os.close(saved)
 
 
 def safe_optimum_export(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path, onnx_opset_version: int, results_queue: multiprocessing.Queue, device: str, library_name: str | None = None, verbose: bool = False):
@@ -109,12 +135,18 @@ def safe_optimum_export(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cach
             this_status = 'success'
             this_error = ''
         except MemoryError as exception:
+            if verbose:
+                logger.exception(f'Fail to export Optimum model: {model_id}; opset: {onnx_opset_version}')
             this_status = 'oversize'
             this_error = str(exception)
         except utils.RepositoryNotFoundError as exception:
+            if verbose:
+                logger.exception(f'Fail to export Optimum model: {model_id}; opset: {onnx_opset_version}')
             this_status = 'access_deny'
             this_error = str(exception)
         except Exception as exception:
+            if verbose:
+                logger.exception(f'Fail to export Optimum model: {model_id}; opset: {onnx_opset_version}')
             error_text = f"{type(exception).__name__}: {exception}"
 
             if (
@@ -128,6 +160,8 @@ def safe_optimum_export(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cach
 
             this_error = error_text
     except Exception as exception:
+        if verbose:
+            logger.exception(f'Fail to export Optimum model: {model_id}; opset: {onnx_opset_version}')
         this_status = "covert_worker_error"
         this_error = f"{type(exception).__name__}: {exception}"
 
@@ -184,6 +218,7 @@ def convert_optimum(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_di
                         artifacts.append((artifact, onnx_opset_version))
                         this_status_details[artifact] = 'success'
                     except Exception as exception:
+                        logger.error(f'Fail in convert_optimum: {model_id}; {type(exception).__name__}: {exception}', exc_info=verbose)
                         this_status_details[artifact] = 'logicx_error'
 
         if this_status == 'access_deny':
@@ -194,7 +229,7 @@ def convert_optimum(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_di
             # Stop here, so `status` may not contain entries for subsequent opsets.
             # Keep this semantic difference in mind if this logic is changed in the future.
             break
-            
+
         if this_status == 'convert_error':
             # Permanent error -> skip remaining opsets entirely
             if is_permanent_error(this_error):
@@ -229,114 +264,115 @@ def convert_optimum(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_di
     return status, instances, artifacts
 
 
-def safe_sb3_export(model_id: str, sb3_model_path: pathlib.Path, onnx_model_path: pathlib.Path, onnx_opset_version: int, results_queue: multiprocessing.Queue):
-    import torch
-    import gymnasium
-    import stable_baselines3
-
-    sb3_algorithm_names = set(['ppo', 'a2c', 'dqn', 'sac', 'td3', 'ddpg'])
-    def infer_sb3_algorithm(model_id: str, sb3_model_path: pathlib.Path) -> Literal['ppo', 'a2c', 'dqn', 'sac', 'td3', 'ddpg'] | None:
-        # First, try to infer the algorithm from the model file name.
-        for sb3_algorithm_name in sb3_algorithm_names:
-            if sb3_algorithm_name in sb3_model_path.name.lower():
-                return sb3_algorithm_name
-
-        # If that fails, try to infer the algorithm from the model ID.
-        for sb3_algorithm_name in sb3_algorithm_names:
-            if sb3_algorithm_name in model_id.lower():
-                return sb3_algorithm_name
-
-        return None
-
-    def load_sb3_model(sb3_model_path: pathlib.Path, sb3_algorithm_name: Literal['ppo', 'a2c', 'dqn', 'sac', 'td3', 'ddpg'] | None):
-        if sb3_algorithm_name is None:
-            for sb3_algorithm_name in sb3_algorithm_names:
-                try:
-                    return stable_baselines3.__dict__[sb3_algorithm_name.upper()].load(sb3_model_path, device='cpu', custom_objects={"optimize_memory_usage": False, "handle_timeout_termination": False})
-                except Exception:
-                    continue
-            raise ValueError(f"Current model at {sb3_model_path} could not be loaded because the algorithm could not be inferred, this may indicate an unsupported algorithm.")
-        else:
-            return stable_baselines3.__dict__[sb3_algorithm_name.upper()].load(sb3_model_path, custom_objects={"optimize_memory_usage": False, "handle_timeout_termination": False})
-
-    class PureMathWrapper(torch.nn.Module):
-        #Bypasses the strict probability distribution check in PyTorch 2.0+ Dynamo 
-        #by manually mapping the pure mathematical tensor flow.
-        def __init__(self, model):
-            super().__init__()
-            self.model_name = model.__class__.__name__
-            self.action_space = model.action_space
-            self.observation_space = model.observation_space
-
-            # Security interceptor: Block RNNs and Mask mechanisms to prevent ONNX graph explosion
-            # Keep extraction conservative. RNN/maskable policies often need
-            # additional state inputs that this generic exporter does not support.
-            if 'recurrent' in self.model_name.lower() or 'maskable' in self.model_name.lower():
-                raise NotImplementedError(f'Unsupported SB3 family for export: {self.model_name}.')
-
-            if self.model_name.upper() in {'SAC', 'TD3', 'DDPG', 'TQC'}:
-                self.net = model.policy.actor
-            elif self.model_name.upper() in {'DQN', 'QRDQN'}:
-                self.net = model.policy.q_net
-            else:
-                # Covers PPO, A2C, TRPO, etc.
-                self.net = model.policy
-
-            self.is_dict = isinstance(model.observation_space, gymnasium.spaces.Dict)
-            if self.is_dict:
-                self.keys = list(model.observation_space.spaces.keys())
-            else:
-                self.keys = list()
-
-        def forward(self, *args):
-            if self.is_dict:
-                observations = {k: v for k, v in zip(self.keys, args)}
-            else:
-                observations = args[0]
-
-            if self.model_name.upper() in {'DQN', 'QRDQN', 'TD3', 'DDPG'}:
-                return self.net(observations)
-
-            if self.model_name.upper() in {'SAC', 'TQC'}:
-                features = self.net.extract_features(observations, self.net.features_extractor)
-                latent_pi = self.net.latent_pi(features)
-                return torch.tanh(self.net.mu(latent_pi))
-
-            features = self.net.extract_features(observations)
-            if self.net.share_features_extractor:
-                latent_pi, _ = self.net.mlp_extractor(features)
-            else:
-                latent_pi = self.net.mlp_extractor.forward_actor(features[0])
-
-            mean_actions = self.net.action_net(latent_pi)
-            if isinstance(self.action_space, gymnasium.spaces.Discrete):
-                return torch.argmax(mean_actions, dim=1)
-            return mean_actions
-
+def safe_sb3_export(model_id: str, sb3_model_path: pathlib.Path, onnx_model_path: pathlib.Path, onnx_opset_version: int, results_queue: multiprocessing.Queue, verbose: bool = False):
     try:
-        sb3_algorithm_name = infer_sb3_algorithm(model_id, sb3_model_path)
-        model = load_sb3_model(sb3_model_path, sb3_algorithm_name)
-        model= PureMathWrapper(model)
-        model.eval()
+        with export_output(verbose):
+            import torch
+            import gymnasium
+            import stable_baselines3
 
-        model_device = next(model.parameters()).device
-        if model.is_dict:
-            dummy_input = tuple(torch.randn(1, *model.observation_space.spaces[key].shape).to(model_device) for key in model.keys)
-            input_names = [f'input_{key}' for key in model.keys]
-        else:
-            dummy_input = (torch.randn(1, *model.observation_space.shape).to(model_device), )
-            input_names = ['input_observation']
+            sb3_algorithm_names = set(['ppo', 'a2c', 'dqn', 'sac', 'td3', 'ddpg'])
+            def infer_sb3_algorithm(model_id: str, sb3_model_path: pathlib.Path) -> Literal['ppo', 'a2c', 'dqn', 'sac', 'td3', 'ddpg'] | None:
+                # First, try to infer the algorithm from the model file name.
+                for sb3_algorithm_name in sb3_algorithm_names:
+                    if sb3_algorithm_name in sb3_model_path.name.lower():
+                        return sb3_algorithm_name
 
-        torch.onnx.export(model, dummy_input, onnx_model_path, opset_version=onnx_opset_version, input_names=input_names, output_names=['output_action'])
-        this_status = 'success'
+                # If that fails, try to infer the algorithm from the model ID.
+                for sb3_algorithm_name in sb3_algorithm_names:
+                    if sb3_algorithm_name in model_id.lower():
+                        return sb3_algorithm_name
+
+                return None
+
+            def load_sb3_model(sb3_model_path: pathlib.Path, sb3_algorithm_name: Literal['ppo', 'a2c', 'dqn', 'sac', 'td3', 'ddpg'] | None):
+                if sb3_algorithm_name is None:
+                    for sb3_algorithm_name in sb3_algorithm_names:
+                        try:
+                            return stable_baselines3.__dict__[sb3_algorithm_name.upper()].load(sb3_model_path, device='cpu', custom_objects={"optimize_memory_usage": False, "handle_timeout_termination": False})
+                        except Exception:
+                            continue
+                    raise ValueError(f"Current model at {sb3_model_path} could not be loaded because the algorithm could not be inferred, this may indicate an unsupported algorithm.")
+                else:
+                    return stable_baselines3.__dict__[sb3_algorithm_name.upper()].load(sb3_model_path, custom_objects={"optimize_memory_usage": False, "handle_timeout_termination": False})
+
+            class PureMathWrapper(torch.nn.Module):
+                #Bypasses the strict probability distribution check in PyTorch 2.0+ Dynamo
+                #by manually mapping the pure mathematical tensor flow.
+                def __init__(self, model):
+                    super().__init__()
+                    self.model_name = model.__class__.__name__
+                    self.action_space = model.action_space
+                    self.observation_space = model.observation_space
+
+                    # Security interceptor: Block RNNs and Mask mechanisms to prevent ONNX graph explosion
+                    # Keep extraction conservative. RNN/maskable policies often need
+                    # additional state inputs that this generic exporter does not support.
+                    if 'recurrent' in self.model_name.lower() or 'maskable' in self.model_name.lower():
+                        raise NotImplementedError(f'Unsupported SB3 family for export: {self.model_name}.')
+
+                    if self.model_name.upper() in {'SAC', 'TD3', 'DDPG', 'TQC'}:
+                        self.net = model.policy.actor
+                    elif self.model_name.upper() in {'DQN', 'QRDQN'}:
+                        self.net = model.policy.q_net
+                    else:
+                        # Covers PPO, A2C, TRPO, etc.
+                        self.net = model.policy
+
+                    self.is_dict = isinstance(model.observation_space, gymnasium.spaces.Dict)
+                    if self.is_dict:
+                        self.keys = list(model.observation_space.spaces.keys())
+                    else:
+                        self.keys = list()
+
+                def forward(self, *args):
+                    if self.is_dict:
+                        observations = {k: v for k, v in zip(self.keys, args)}
+                    else:
+                        observations = args[0]
+
+                    if self.model_name.upper() in {'DQN', 'QRDQN', 'TD3', 'DDPG'}:
+                        return self.net(observations)
+
+                    if self.model_name.upper() in {'SAC', 'TQC'}:
+                        features = self.net.extract_features(observations, self.net.features_extractor)
+                        latent_pi = self.net.latent_pi(features)
+                        return torch.tanh(self.net.mu(latent_pi))
+
+                    features = self.net.extract_features(observations)
+                    if self.net.share_features_extractor:
+                        latent_pi, _ = self.net.mlp_extractor(features)
+                    else:
+                        latent_pi = self.net.mlp_extractor.forward_actor(features[0])
+
+                    mean_actions = self.net.action_net(latent_pi)
+                    if isinstance(self.action_space, gymnasium.spaces.Discrete):
+                        return torch.argmax(mean_actions, dim=1)
+                    return mean_actions
+
+            sb3_algorithm_name = infer_sb3_algorithm(model_id, sb3_model_path)
+            model = load_sb3_model(sb3_model_path, sb3_algorithm_name)
+            model= PureMathWrapper(model)
+            model.eval()
+
+            model_device = next(model.parameters()).device
+            if model.is_dict:
+                dummy_input = tuple(torch.randn(1, *model.observation_space.spaces[key].shape).to(model_device) for key in model.keys)
+                input_names = [f'input_{key}' for key in model.keys]
+            else:
+                dummy_input = (torch.randn(1, *model.observation_space.shape).to(model_device), )
+                input_names = ['input_observation']
+
+            torch.onnx.export(model, dummy_input, onnx_model_path, opset_version=onnx_opset_version, input_names=input_names, output_names=['output_action'])
+            this_status = 'success'
     except Exception as exception:
         this_status = 'convert_error'
-        logger.exception(f'Fail to export SB3 model: {model_id}')
+        logger.error(f'Fail to export SB3 model: {model_id}; {type(exception).__name__}: {exception}', exc_info=verbose)
     finally:
         results_queue.put(this_status)
 
 
-def convert_sb3(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path, device: Literal['cpu', 'cuda'] = 'cpu', library_name: str | None = None) -> tuple[dict[str, dict[int, Literal['success', 'oversize', 'access_deny', 'convert_error', 'system_kill', 'logicx_error']]], list[Instance], list[tuple[str, int]]]:
+def convert_sb3(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path, device: Literal['cpu', 'cuda'] = 'cpu', library_name: str | None = None, verbose: bool = False) -> tuple[dict[str, dict[int, Literal['success', 'oversize', 'access_deny', 'convert_error', 'system_kill', 'logicx_error']]], list[Instance], list[tuple[str, int]]]:
     status: dict[str, dict[int, Literal['success', 'oversize', 'access_deny', 'convert_error', 'system_kill', 'logicx_error']]] = dict()
     instances: list[Instance] = list()
     artifacts: list[tuple[str, int]] = list()
@@ -354,6 +390,7 @@ def convert_sb3(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpat
         try:
             sb3_model_path = pathlib.Path(hf_hub_download(model_id, remote_sb3_model_path, cache_dir=ofc_cache_dirpath))
         except Exception as exception:
+            logger.error(f'Fail in convert_sb3: {model_id}; {type(exception).__name__}: {exception}', exc_info=verbose)
             status[remote_sb3_model_path] = 'access_deny'
             continue
 
@@ -361,7 +398,7 @@ def convert_sb3(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpat
         onnx_model_path = cvt_cache_dirpath.joinpath(f'{hash_string(str(sb3_model_path))}.onnx')
         for onnx_opset_version in opset_versions:
             results_queue = multiprocessing.Queue()
-            subprocess = multiprocessing.Process(target=safe_sb3_export, args=(model_id, sb3_model_path, onnx_model_path, onnx_opset_version, results_queue))
+            subprocess = multiprocessing.Process(target=safe_sb3_export, args=(model_id, sb3_model_path, onnx_model_path, onnx_opset_version, results_queue, verbose))
             subprocess.start()
             subprocess.join()
 
@@ -375,7 +412,8 @@ def convert_sb3(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpat
                         instance.setup_logicx(convert(load_model(pathlib.Path(onnx_model_path))))
                         instances.append(instance)
                         artifacts.append((remote_sb3_model_path, onnx_opset_version))
-                    except Exception:
+                    except Exception as exception:
+                        logger.error(f'Fail in convert_sb3: {model_id}; {type(exception).__name__}: {exception}', exc_info=verbose)
                         this_status = 'logicx_error'
 
             status[remote_sb3_model_path][onnx_opset_version] = this_status
@@ -384,24 +422,26 @@ def convert_sb3(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpat
     return status, instances, artifacts
 
 
-def safe_keras_export(keras_model_path: pathlib.Path, onnx_model_path: pathlib.Path, onnx_opset_version: int, results_queue: multiprocessing.Queue):
-    from .miscs import tf2onnx_main_export
-
-    if keras_model_path.is_dir():
-        model_type = 'saved_model'
-    if keras_model_path.is_file():
-        model_type = 'keras'
-
+def safe_keras_export(keras_model_path: pathlib.Path, onnx_model_path: pathlib.Path, onnx_opset_version: int, results_queue: multiprocessing.Queue, verbose: bool = False):
     try:
-        tf2onnx_main_export(keras_model_path, onnx_model_path, onnx_opset_version, model_type=model_type)
-        this_status = 'success'
+        with export_output(verbose):
+            from .miscs import tf2onnx_main_export
+
+            if keras_model_path.is_dir():
+                model_type = 'saved_model'
+            if keras_model_path.is_file():
+                model_type = 'keras'
+
+            tf2onnx_main_export(keras_model_path, onnx_model_path, onnx_opset_version, model_type=model_type)
+            this_status = 'success'
     except Exception as exception:
+        logger.error(f'Fail to export model: {keras_model_path}; opset: {onnx_opset_version}; {type(exception).__name__}: {exception}', exc_info=verbose)
         this_status = 'convert_error'
 
     results_queue.put(this_status)
 
 
-def convert_keras(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path, device: Literal['cpu', 'cuda'] = 'cpu', library_name: str | None = None) -> tuple[dict[str, dict[int, Literal['success', 'convert_error', 'system_kill', 'logicx_error']]], list[Instance], list[tuple[str, int]]]:
+def convert_keras(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path, device: Literal['cpu', 'cuda'] = 'cpu', library_name: str | None = None, verbose: bool = False) -> tuple[dict[str, dict[int, Literal['success', 'convert_error', 'system_kill', 'logicx_error']]], list[Instance], list[tuple[str, int]]]:
     status: dict[str, Literal['access_deny'] | dict[int, Literal['success', 'convert_error', 'logicx_error']]] = dict()
     instances: list[Instance] = list()
     artifacts: list[tuple[str, int]] = list()
@@ -422,6 +462,7 @@ def convert_keras(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirp
             if path_type == 'F':
                 keras_model_path = pathlib.Path(hf_hub_download(model_id, remote_keras_model_path, cache_dir=ofc_cache_dirpath))
         except Exception as exception:
+            logger.error(f'Fail in convert_keras: {model_id}; {type(exception).__name__}: {exception}', exc_info=verbose)
             status[artifact] = 'access_deny'
             continue
 
@@ -432,7 +473,7 @@ def convert_keras(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirp
             if onnx_opset_version < 14 or 18 < onnx_opset_version:
                 continue
             results_queue = multiprocessing.Queue()
-            subprocess = multiprocessing.Process(target=safe_keras_export, args=(keras_model_path, onnx_model_path, onnx_opset_version, results_queue))
+            subprocess = multiprocessing.Process(target=safe_keras_export, args=(keras_model_path, onnx_model_path, onnx_opset_version, results_queue, verbose))
             subprocess.start()
             subprocess.join()
 
@@ -447,6 +488,7 @@ def convert_keras(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirp
                         instances.append(instance)
                         artifacts.append((artifact, onnx_opset_version))
                     except Exception as exception:
+                        logger.error(f'Fail in convert_keras: {model_id}; {type(exception).__name__}: {exception}', exc_info=verbose)
                         this_status = 'logicx_error'
             status[artifact][onnx_opset_version] = this_status
 
@@ -454,19 +496,21 @@ def convert_keras(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirp
     return status, instances, artifacts
 
 
-def safe_tflite_export(tflite_model_path: pathlib.Path, onnx_model_path: pathlib.Path, onnx_opset_version: int, results_queue: multiprocessing.Queue):
-    from .miscs import tf2onnx_main_export
-
+def safe_tflite_export(tflite_model_path: pathlib.Path, onnx_model_path: pathlib.Path, onnx_opset_version: int, results_queue: multiprocessing.Queue, verbose: bool = False):
     try:
-        tf2onnx_main_export(tflite_model_path, onnx_model_path, onnx_opset_version, model_type='tflite')
-        this_status = 'success'
+        with export_output(verbose):
+            from .miscs import tf2onnx_main_export
+
+            tf2onnx_main_export(tflite_model_path, onnx_model_path, onnx_opset_version, model_type='tflite')
+            this_status = 'success'
     except Exception as exception:
+        logger.error(f'Fail to export model: {tflite_model_path}; opset: {onnx_opset_version}; {type(exception).__name__}: {exception}', exc_info=verbose)
         this_status = 'convert_error'
 
     results_queue.put(this_status)
 
 
-def convert_tflite(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path, device: Literal['cpu', 'cuda'] = 'cpu', library_name: str | None = None) -> tuple[dict[str, dict[int, Literal['success', 'convert_error', 'system_kill', 'logicx_error']]], list[Instance], list[tuple[str, int]]]:
+def convert_tflite(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path, device: Literal['cpu', 'cuda'] = 'cpu', library_name: str | None = None, verbose: bool = False) -> tuple[dict[str, dict[int, Literal['success', 'convert_error', 'system_kill', 'logicx_error']]], list[Instance], list[tuple[str, int]]]:
     status: dict[str, Literal['access_deny'] | dict[int, Literal['success', 'convert_error', 'system_kill', 'logicx_error']]] = dict()
     instances: list[Instance] = list()
     artifacts: list[tuple[str, int]] = list()
@@ -475,6 +519,7 @@ def convert_tflite(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dir
         try:
             tflite_model_path = pathlib.Path(hf_hub_download(model_id, remote_tflite_model_path, cache_dir=ofc_cache_dirpath))
         except Exception as exception:
+            logger.error(f'Fail in convert_tflite: {model_id}; {type(exception).__name__}: {exception}', exc_info=verbose)
             status[remote_tflite_model_path] = 'access_deny'
             continue
 
@@ -485,7 +530,7 @@ def convert_tflite(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dir
             if onnx_opset_version < 14 or 18 < onnx_opset_version:
                 continue
             results_queue = multiprocessing.Queue()
-            subprocess = multiprocessing.Process(target=safe_tflite_export, args=(tflite_model_path, onnx_model_path, onnx_opset_version, results_queue))
+            subprocess = multiprocessing.Process(target=safe_tflite_export, args=(tflite_model_path, onnx_model_path, onnx_opset_version, results_queue, verbose))
             subprocess.start()
             subprocess.join()
             if results_queue.empty():
@@ -499,6 +544,7 @@ def convert_tflite(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dir
                         instances.append(instance)
                         artifacts.append((remote_tflite_model_path, onnx_opset_version))
                     except Exception as exception:
+                        logger.error(f'Fail in convert_tflite: {model_id}; {type(exception).__name__}: {exception}', exc_info=verbose)
                         this_status = 'logicx_error'
 
             status[remote_tflite_model_path][onnx_opset_version] = this_status
@@ -507,19 +553,21 @@ def convert_tflite(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dir
     return status, instances, artifacts
 
 
-def safe_onnx_export(origin_version_onnx_model_path: pathlib.Path, onnx_model_path: pathlib.Path, onnx_opset_version, results_queue: multiprocessing.Queue):
+def safe_onnx_export(origin_version_onnx_model_path: pathlib.Path, onnx_model_path: pathlib.Path, onnx_opset_version, results_queue: multiprocessing.Queue, verbose: bool = False):
     try:
-        origin_version_onnx_model = load_model(origin_version_onnx_model_path)
-        # Convert the ONNX model to the target opset version. This step will not occupy disk space. Thus cvt_cache_dirpath is not used.
-        onnx.save_model(onnx.version_converter.convert_version(origin_version_onnx_model, onnx_opset_version), onnx_model_path)
-        this_status = 'success'
+        with export_output(verbose):
+            origin_version_onnx_model = load_model(origin_version_onnx_model_path)
+            # Convert the ONNX model to the target opset version. This step will not occupy disk space. Thus cvt_cache_dirpath is not used.
+            onnx.save_model(onnx.version_converter.convert_version(origin_version_onnx_model, onnx_opset_version), onnx_model_path)
+            this_status = 'success'
     except Exception as exception:
+        logger.error(f'Fail to export model: {origin_version_onnx_model_path}; opset: {onnx_opset_version}; {type(exception).__name__}: {exception}', exc_info=verbose)
         this_status = 'convert_error'
 
     results_queue.put(this_status)
 
 
-def convert_onnx(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path, device: Literal['cpu', 'cuda'] = 'cpu', library_name: str | None = None) -> tuple[dict[str, dict[int, Any] | Literal['system_kill']], list[Instance], list[tuple[str, int]]]:
+def convert_onnx(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpath: pathlib.Path, device: Literal['cpu', 'cuda'] = 'cpu', library_name: str | None = None, verbose: bool = False) -> tuple[dict[str, dict[int, Any] | Literal['system_kill']], list[Instance], list[tuple[str, int]]]:
     status: dict[str, dict[int, str] | Literal['system_kill']] = dict()
     instances: list[Instance] = list()
     artifacts: list[tuple[str, int]] = list()
@@ -528,6 +576,7 @@ def convert_onnx(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpa
         try:
             onnx_model_path = pathlib.Path(hf_hub_download(model_id, remote_onnx_model_path, cache_dir=ofc_cache_dirpath))
         except Exception as exception:
+            logger.error(f'Fail in convert_onnx: {model_id}; {type(exception).__name__}: {exception}', exc_info=verbose)
             status[remote_onnx_model_path] = 'access_deny'
             continue
 
@@ -536,12 +585,14 @@ def convert_onnx(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpa
         try:
             onnx_model = load_model(onnx_model_path)
         except Exception as exception:
+            logger.error(f'Fail in convert_onnx: {model_id}; {type(exception).__name__}: {exception}', exc_info=verbose)
             status[remote_onnx_model_path] = 'onnx_load_error'
             continue
 
         try:
             onnx_model_opset_version = get_onnx_model_opset_version(onnx_model)
         except Exception as exception:
+            logger.error(f'Fail in convert_onnx: {model_id}; {type(exception).__name__}: {exception}', exc_info=verbose)
             status[remote_onnx_model_path] = 'onnx_opset_error'
             continue
 
@@ -554,11 +605,12 @@ def convert_onnx(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpa
                     instances.append(instance)
                     artifacts.append((remote_onnx_model_path, onnx_opset_version))
                 except Exception as exception:
+                    logger.error(f'Fail in convert_onnx: {model_id}; {type(exception).__name__}: {exception}', exc_info=verbose)
                     this_status = 'logicx_error'
             else:
                 other_version_onnx_model_path = cvt_cache_dirpath.joinpath(f'{hash_string(str(onnx_model_path))}.onnx')
                 results_queue = multiprocessing.Queue()
-                subprocess = multiprocessing.Process(target=safe_onnx_export, args=(onnx_model_path, other_version_onnx_model_path, onnx_opset_version, results_queue))
+                subprocess = multiprocessing.Process(target=safe_onnx_export, args=(onnx_model_path, other_version_onnx_model_path, onnx_opset_version, results_queue, verbose))
                 subprocess.start()
                 subprocess.join()
                 if results_queue.empty():
@@ -572,6 +624,7 @@ def convert_onnx(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpa
                             instances.append(instance)
                             artifacts.append((remote_onnx_model_path, onnx_opset_version))
                         except Exception as exception:
+                            logger.error(f'Fail in convert_onnx: {model_id}; {type(exception).__name__}: {exception}', exc_info=verbose)
                             this_status = 'logicx_error'
             status[remote_onnx_model_path][onnx_opset_version] = this_status
 
@@ -665,7 +718,7 @@ def main(
     :type device: Literal[&#39;cpu&#39;, &#39;cuda&#39;], optional
     :param framework: _description_, defaults to 'optimum'
     :type framework: Literal[&#39;optimum&#39;, &#39;onnx&#39;, &#39;keras&#39;, &#39;tflite&#39;], optional
-    :param verbose: Show Optimum worker output, including model download progress.
+    :param verbose: Show backend output and full exception tracebacks for all conversion frameworks.
     :param library_name: Required for optimum; only convert models belonging to this library.
     :param model_size_limit_l: Inclusive lower size limit in bytes, defaults to None
     :type model_size_limit_l: int | None, optional
@@ -749,10 +802,7 @@ def main(
                     progress_bar.update(1)
                     continue
 
-                if framework == 'optimum':
-                    status, instances, artifacts = convert_method(model_id, cvt_cache_dirpath, ofc_cache_dirpath, device, library_name=model_library_name, verbose=verbose)
-                else:
-                    status, instances, artifacts = convert_method(model_id, cvt_cache_dirpath, ofc_cache_dirpath, device, library_name=model_library_name)
+                status, instances, artifacts = convert_method(model_id, cvt_cache_dirpath, ofc_cache_dirpath, device, library_name=model_library_name, verbose=verbose)
 
                 model_owner, model_name = model_id.split('/')
                 model_dirpath = instances_dirpath.joinpath(model_owner, model_name)

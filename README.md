@@ -226,9 +226,10 @@ models using the existing tag priority: sentence-transformers, transformers,
 diffusers, timm. It does not force unrelated models through the selected library.
 `--library-name` is required with `--framework optimum`, including estimate runs.
 Add `--estimate` to count the selected models without exporting them.
-Add `--verbose` to show Optimum worker output, including model download progress
-and backend warnings. Worker output is suppressed by default; this option does
-not change the output of other conversion frameworks.
+Add `--verbose` for any conversion framework to show worker output, including
+backend progress, warnings, and full exception tracebacks. By default, worker
+output is suppressed and caught failures are reported as summaries. Main-process
+progress and conversion status records remain available.
 
 For TensorFlow, install `scripts-hubs-hf-tensorflow` in a Python 3.11 environment
 and use `--framework keras` or `--framework tflite`, without `--library-name`.
@@ -243,6 +244,35 @@ combined-run checkpoints are not reused by a library-specific run.
 For PyPI installations, Python 3.11 support requires releases of both the kernel
 and IR with the updated Python metadata. Until then, use the source installation
 shown above. Install the matching published extra once those releases are available.
+
+### Save conversion logs
+
+In Bash or Zsh, capture standard output and standard error while keeping them
+visible in the terminal:
+
+```bash
+set -o pipefail
+mkdir -p logs
+PYTHONUNBUFFERED=1 younger-logics-ir create onnx convert huggingface \
+    --model-infos-filepath ./models.json \
+    --save-dirpath ./output \
+    --cache-dirpath ./cache-diffusers \
+    --framework optimum \
+    --library-name diffusers \
+    --device cpu \
+    --verbose \
+    2>&1 | tee logs/conversion.log
+```
+
+This captures output from the main process and child processes that inherit its
+stdout/stderr, including warnings and exception tracebacks. Use `--verbose` for
+complete worker output and tracebacks in all conversion frameworks. Without it,
+caught export, download, and graph conversion errors are reported as summaries.
+Use `tee -a` to append instead of overwriting the log. `PYTHONUNBUFFERED=1` reduces
+Python output buffering, and `pipefail` preserves command failures in the pipeline
+exit status. Individual model failures may be recorded without failing the whole
+command; check the conversion status files as well. A process killed by the OS
+may exit without a Python traceback.
 
 ## Prepare Hugging Face conversion jobs
 

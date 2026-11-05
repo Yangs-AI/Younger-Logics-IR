@@ -151,7 +151,7 @@ def create_onnx_convert():
 @click.option('--model-size-limit-l',   required=False, type=click.FloatRange(min=0), default=None, help='Inclusive lower model size limit in GB (1024^3 bytes); accepts decimals, e.g. 0.5 or 3.')
 @click.option('--model-size-limit-r',   required=False, type=click.FloatRange(min=0), default=None, help='Inclusive upper model size limit in GB (1024^3 bytes); accepts decimals, e.g. 0.5 or 3.')
 @click.option('--token',                required=False, type=str, default=None, help='The HuggingFace token, which requires registering an account on HuggingFace and manually setting the access token. If None, retrieve without HuggingFace access token.')
-@click.option('--verbose',              is_flag=True,   help='Show Optimum worker output, including model download progress.')
+@click.option('--verbose',              is_flag=True,   help='Show backend output and full exception tracebacks for all conversion frameworks.')
 @click.option('--estimate',             is_flag=True,   help='Use to estimate models will be converted. No Conversion Processes.')
 @click.option('--logging-filepath',     required=False, type=click.Path(exists=False, file_okay=True, dir_okay=False, path_type=pathlib.Path), default=None, help='Path to the log file; if not provided, defaults to outputting to the terminal only.')
 def create_onnx_convert_huggingface(
