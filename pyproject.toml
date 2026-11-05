@@ -9,7 +9,7 @@ exclude = ["tests*", "third_parties*"]
 [project]
 name = "Younger-Logics-IR"
 description = "Provides a Unified Intermediate Representation For Neural Networks, Enabling Framework-Agnostic Analysis, Conversion, and Optimization."
-version = "0.1.0"
+version = "0.2.0"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
