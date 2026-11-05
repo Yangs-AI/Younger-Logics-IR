@@ -15,6 +15,7 @@
 
 
 import click
+import math
 import pathlib
 
 from younger_logics_ir.commons.logging import equip_logger
@@ -112,6 +113,29 @@ def create_onnx_retrieve_torch(
     retrieve.main(mode, save_dirpath, **kwargs)
 
 
+@create_onnx.group(name='prepare')
+def create_onnx_prepare():
+    pass
+
+
+@create_onnx_prepare.command(name='huggingface')
+@click.option('--model-infos-dirpath', required=True, type=click.Path(exists=True, file_okay=False, path_type=pathlib.Path), help='Directory containing Model_Infos JSON files.')
+@click.option('--save-dirpath', required=True, type=click.Path(exists=True, file_okay=False, path_type=pathlib.Path), help='Empty directory for prepared model lists.')
+@click.option('--date-l', required=False, type=str, default=None, help='Inclusive lower lastModified date: YYYY-MM-DD, UTC midnight.')
+@click.option('--date-r', required=False, type=str, default=None, help='Exclusive upper lastModified date: YYYY-MM-DD, UTC midnight.')
+@click.option('--number-per-file', required=True, type=click.IntRange(min=1), help='Maximum models per prepared file.')
+@click.option('--logging-filepath', required=False, type=click.Path(file_okay=True, dir_okay=False, path_type=pathlib.Path), default=None, help='Path to the log file.')
+def create_onnx_prepare_huggingface(model_infos_dirpath, save_dirpath, date_l, date_r, number_per_file, logging_filepath):
+    equip_logger(logging_filepath=logging_filepath)
+
+    from younger_logics_ir.scripts.hubs.huggingface import prepare
+
+    try:
+        prepare.main(model_infos_dirpath, save_dirpath, date_l=date_l, date_r=date_r, number_per_file=number_per_file)
+    except ValueError as exception:
+        raise click.ClickException(str(exception)) from exception
+
+
 @create_onnx.group(name='convert')
 def create_onnx_convert():
     pass
@@ -123,22 +147,37 @@ def create_onnx_convert():
 @click.option('--cache-dirpath',        required=True,  type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=pathlib.Path), help='Cache directory, where data is volatile.')
 @click.option('--device',               required=False, type=click.Choice(['cpu', 'cuda'], case_sensitive=True), default='cpu', help='Used to indicate whether to use GPU or CPU when converting models.')
 @click.option('--framework',            required=False, type=click.Choice(['optimum', 'onnx', 'keras', 'tflite', 'stable_baselines3'], case_sensitive=True), default='optimum', help='Indicates the framework to which the model belonged prior to conversion.')
-@click.option('--model-size-limit-l',   required=False, type=int, default=None, help='Used to filter out oversized models to prevent process interruptions due to excessive storage usage. (Note: The storage space occupied by models is a simple estimation and may have inaccuracies. Please use with caution.)')
-@click.option('--model-size-limit-r',   required=False, type=int, default=None, help='Used to filter out oversized models to prevent process interruptions due to excessive storage usage. (Note: The storage space occupied by models is a simple estimation and may have inaccuracies. Please use with caution.)')
+@click.option('--library-name',         required=False, type=click.Choice(['transformers', 'diffusers', 'timm', 'sentence_transformers'], case_sensitive=True), default=None, help='Only convert models belonging to this library. Required with --framework optimum; unavailable with other frameworks.')
+@click.option('--model-size-limit-l',   required=False, type=click.FloatRange(min=0), default=None, help='Inclusive lower model size limit in GB (1024^3 bytes); accepts decimals, e.g. 0.5 or 3.')
+@click.option('--model-size-limit-r',   required=False, type=click.FloatRange(min=0), default=None, help='Inclusive upper model size limit in GB (1024^3 bytes); accepts decimals, e.g. 0.5 or 3.')
 @click.option('--token',                required=False, type=str, default=None, help='The HuggingFace token, which requires registering an account on HuggingFace and manually setting the access token. If None, retrieve without HuggingFace access token.')
+@click.option('--verbose',              is_flag=True,   help='Show backend output and full exception tracebacks for all conversion frameworks.')
 @click.option('--estimate',             is_flag=True,   help='Use to estimate models will be converted. No Conversion Processes.')
 @click.option('--logging-filepath',     required=False, type=click.Path(exists=False, file_okay=True, dir_okay=False, path_type=pathlib.Path), default=None, help='Path to the log file; if not provided, defaults to outputting to the terminal only.')
 def create_onnx_convert_huggingface(
     model_infos_filepath,
     save_dirpath, cache_dirpath,
-    device, framework, model_size_limit_l, model_size_limit_r, token, estimate,
+    device, framework, library_name, model_size_limit_l, model_size_limit_r, token, estimate, verbose,
     logging_filepath
 ):
     equip_logger(logging_filepath=logging_filepath)
 
+    if framework == 'optimum' and library_name is None:
+        raise click.BadParameter('Required with --framework optimum.', param_hint='--library-name')
+    if library_name is not None and framework != 'optimum':
+        raise click.BadParameter('Only available with --framework optimum.', param_hint='--library-name')
+
+    for limit in (model_size_limit_l, model_size_limit_r):
+        if limit is not None and not math.isfinite(limit):
+            raise click.BadParameter('Model size limits must be finite numbers.')
+    if model_size_limit_l is not None and model_size_limit_r is not None and model_size_limit_l > model_size_limit_r:
+        raise click.BadParameter('The lower model size limit must not exceed the upper limit.')
+    model_size_limit_l = int(model_size_limit_l * 1024 ** 3) if model_size_limit_l is not None else None
+    model_size_limit_r = int(model_size_limit_r * 1024 ** 3) if model_size_limit_r is not None else None
+
     from younger_logics_ir.scripts.hubs.huggingface import convert
 
-    convert.main(model_infos_filepath, save_dirpath, cache_dirpath, device=device, framework=framework, model_size_limit_l=model_size_limit_l, model_size_limit_r=model_size_limit_r, token=token, estimate=estimate)
+    convert.main(model_infos_filepath, save_dirpath, cache_dirpath, device=device, framework=framework, library_name=library_name, model_size_limit_l=model_size_limit_l, model_size_limit_r=model_size_limit_r, token=token, estimate=estimate, verbose=verbose)
 
 
 @create_onnx_convert.command(name='onnx')
