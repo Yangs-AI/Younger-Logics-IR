@@ -48,7 +48,7 @@ scripts-hubs-hf-diffusers = ["huggingface_hub", "torch", "optimum-onnx[onnxrunti
 scripts-hubs-hf-timm = ["huggingface_hub", "torch", "optimum-onnx[onnxruntime]", "timm"]
 scripts-hubs-hf-sentence-transformers = ["huggingface_hub", "torch", "optimum-onnx[onnxruntime]", "sentence-transformers"]
 scripts-hubs-hf-tensorflow = ["huggingface_hub", "tensorflow==2.15.0", "tf2onnx"]
-scripts-hubs-hf-sb3 = ["huggingface_hub", "torch", "gymnasium", "stable-baselines3[extra]"]
+scripts-hubs-hf-sb3 = ["huggingface_hub", "torch", "gymnasium", "gym", "shimmy", "stable-baselines3[extra]"]
 
 scripts-bootstrap = ["numpy", "pandas", "scipy", "scikit-learn", "umap", "seaborn", "matplotlib", "hdbscan"]
 

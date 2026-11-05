@@ -321,10 +321,10 @@ def safe_sb3_export(model_id: str, sb3_model_path: pathlib.Path, onnx_model_path
 
         model_device = next(model.parameters()).device
         if model.is_dict:
-            dummy_input = tuple(torch.randn(1, *model.observation_space.spaces[key].shape.to(model_device)) for key in model.keys)
+            dummy_input = tuple(torch.randn(1, *model.observation_space.spaces[key].shape).to(model_device) for key in model.keys)
             input_names = [f'input_{key}' for key in model.keys]
         else:
-            dummy_input = (torch.randn(1, *model.observation_space).to(model_device), )
+            dummy_input = (torch.randn(1, *model.observation_space.shape).to(model_device), )
             input_names = ['input_observation']
 
         torch.onnx.export(model, dummy_input, onnx_model_path, opset_version=onnx_opset_version, input_names=input_names, output_names=['output_action'])

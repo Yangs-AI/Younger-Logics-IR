@@ -98,7 +98,7 @@ Available extras:
 - `scripts-hubs-hf-timm`: Timm export through Optimum.
 - `scripts-hubs-hf-sentence-transformers`: Sentence Transformers export through Optimum.
 - `scripts-hubs-hf-tensorflow`: Existing Keras/SavedModel/TFLite conversion with TensorFlow 2.15.0; use Python 3.11.
-- `scripts-hubs-hf-sb3`: Stable-Baselines3 conversion.
+- `scripts-hubs-hf-sb3`: Stable-Baselines3 conversion, including Gym and Shimmy for loading models trained with OpenAI Gym.
 - `scripts-bootstrap`: Filter, normalize, post-process, and some other feature engineering on collected DAG datasets.
 - `tools-vs`: Visualize DAGs (Graphviz).
 - `tools`: Full toolset (combined set).
