@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2026-11-04 16:12:33
+# Last Modified time: 2026-11-10 08:40:02
 # Copyright (c) 2024 Yangs.AI
 # 
 # This source code is licensed under the Apache License 2.0 found in the
@@ -22,7 +22,7 @@ import pathlib
 import requests
 
 from typing import Any, Literal, Generator
-from huggingface_hub import utils, HfFileSystem, get_hf_file_metadata, hf_hub_url, scan_cache_dir
+from huggingface_hub import utils, HfFileSystem, get_hf_file_metadata, hf_hub_url, scan_cache_dir, get_session
 from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE
 
 from younger.commons.io import load_json, save_json, save_pickle, load_pickle, delete_dir, get_human_readable_size_representation
@@ -31,6 +31,10 @@ from younger.commons.string import extract_possible_digits_from_readme_string, e
 
 from younger_logics_ir.commons.cache import YLIR_CACHE_ROOT
 from younger_logics_ir.commons.logging import logger
+
+from .http import hub_http_configured, transport_errors
+
+_TIMEOUT_ERRORS, _CONNECTION_ERRORS = transport_errors()
 
 
 HUGGINGFACE_HUB_API_ENDPOINT = 'https://huggingface.co/api'
@@ -56,6 +60,10 @@ def set_rate_limit(rate_limit: int):
 
 def _apply_rate_limit():
     """Apply request rate limiting to stay under configured API limits."""
+    if hub_http_configured():
+        # Conversion uses the shared request limiter; preserve the older
+        # retrieve command's --rate-limit only when that backend is inactive.
+        return
     global _last_api_request_time
     elapsed = time.time() - _last_api_request_time
     if elapsed < _api_request_interval_sec:
@@ -66,13 +74,19 @@ def _apply_rate_limit():
 def _extract_rate_limit_reset_time(headers: dict) -> float | None:
     """Extract the rate limit reset time in seconds from response headers.
 
-    Tries RateLimit-Reset-After (in seconds) first, then falls back to Retry-After.
+    Reads the official RateLimit t value, then legacy reset and Retry-After delays.
 
     :param headers: Response headers dictionary
     :return: Seconds to wait, or None if not found
     """
-    # Try HuggingFace's RateLimit-Reset-After header (seconds)
-    reset_after = headers.get('RateLimit-Reset-After')
+    # Official Hub header: '"api";r=0;t=55'.
+    headers = {key.lower(): value for key, value in headers.items()}
+    match = re.search(r'(?:^|;)\s*t\s*=\s*(\d+)\s*(?=;|,|$)', headers.get('ratelimit', ''))
+    if match:
+        return float(match.group(1))
+
+    # Compatibility with older servers and standard Retry-After.
+    reset_after = headers.get('ratelimit-reset-after')
     if reset_after is not None:
         try:
             return float(reset_after)
@@ -80,7 +94,7 @@ def _extract_rate_limit_reset_time(headers: dict) -> float | None:
             pass
 
     # Fall back to standard Retry-After header
-    retry_after = headers.get('Retry-After')
+    retry_after = headers.get('retry-after')
     if retry_after is not None:
         try:
             return float(retry_after)
@@ -147,7 +161,7 @@ def _http_request_with_retry(
     On HTTP 429: parses RateLimit header, waits, then retries once.
     All other errors return None immediately.
 
-    :param session: requests Session to use
+    :param session: SDK-managed Requests session or HTTPX/HTTPX2 client
     :param method: HTTP method (GET, POST, etc.)
     :param url: Request URL
     :param max_retries: Maximum number of retries for Timeout/ConnectionError (default 3)
@@ -162,17 +176,17 @@ def _http_request_with_retry(
             response = session.request(method, url, **kwargs)
             utils.hf_raise_for_status(response)
             return response
-        except requests.exceptions.Timeout as e:
+        except _TIMEOUT_ERRORS as e:
             last_exception = e
             logger.warning(f"HTTP timeout for '{url}' (attempt {attempt+1}/{max_retries+1}): {e}")
-        except requests.exceptions.ConnectionError as e:
+        except _CONNECTION_ERRORS as e:
             last_exception = e
             logger.warning(f"HTTP connection error for '{url}' (attempt {attempt+1}/{max_retries+1}): {e}")
-        except requests.exceptions.HTTPError as e:
+        except (utils.HfHubHTTPError, requests.exceptions.HTTPError) as e:
             status = e.response.status_code
             if status == 429:
                 reset_time = _extract_rate_limit_reset_time(e.response.headers)
-                if reset_time is not None and reset_time > 0:
+                if reset_time is not None and reset_time >= 0:
                     logger.warning(f"HTTP 429 for '{url}', waiting {reset_time:.1f}s as per RateLimit header...")
                     time.sleep(reset_time)
                     # Single retry after waiting
@@ -190,9 +204,6 @@ def _http_request_with_retry(
             else:
                 logger.error(f"HTTP {status} for '{url}': {e}")
                 return None
-        except utils.HfHubHTTPError as e:
-            logger.error(f"HF Hub error for '{url}': {e.request_id} - {e.server_message}")
-            return None
         if attempt < max_retries:
             wait = 2 ** attempt
             logger.info(f"Retrying '{url}' in {wait:.1f}s...")
@@ -218,7 +229,7 @@ def get_one_data_from_huggingface_hub_api(path: str, params: dict | None = None,
     # Enforce limit=1000 to maximize items per request
     params['limit'] = 1000
 
-    session = requests.Session()
+    session = get_session()
     headers = utils.build_hf_headers(token=token)
 
     response = _http_request_with_retry(session, 'GET', path, params=params, headers=headers, timeout=30)
@@ -244,7 +255,7 @@ def get_all_data_from_huggingface_hub_api(path: str, params: dict | None = None,
     # Enforce limit=1000 to maximize items per request
     params['limit'] = 1000
 
-    session = requests.Session()
+    session = get_session()
     headers = utils.build_hf_headers(token=token)
 
     # First page

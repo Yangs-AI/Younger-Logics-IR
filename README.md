@@ -220,6 +220,14 @@ those versions in a constraints file when installing additional dependencies.
 Extras declare required libraries, not a tested lockfile: an isolated Diffusers
 environment still needs compatible Optimum, Transformers, Diffusers and Hub versions.
 
+Hub HTTP request pacing supports the 0.x, 1.x, and 2.x backends. Configure the
+account-wide five-minute quotas with `--api-rate-limit` and
+`--resolver-rate-limit`, the number of machines sharing them with `--machine-count`,
+and the usable fraction with `--rate-limit-utilization`. Defaults are
+`2500`, `12000`, `5`, and `0.8`; use the same settings on every machine.
+See [request pacing configuration and validation](docs/huggingface-http.md)
+for budget calculations, compatibility tests, and coverage limits.
+
 Use the matching extra and `--library-name transformers`, `timm`, or
 `sentence_transformers` in the other Optimum environments. The option filters
 models using the existing tag priority: sentence-transformers, transformers,
