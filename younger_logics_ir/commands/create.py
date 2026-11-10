@@ -147,6 +147,10 @@ def create_onnx_convert():
 @click.option('--cache-dirpath',        required=True,  type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=pathlib.Path), help='Cache directory, where data is volatile.')
 @click.option('--device',               required=False, type=click.Choice(['cpu', 'cuda'], case_sensitive=True), default='cpu', help='Used to indicate whether to use GPU or CPU when converting models.')
 @click.option('--framework',            required=False, type=click.Choice(['optimum', 'onnx', 'keras', 'tflite', 'stable_baselines3'], case_sensitive=True), default='optimum', help='Indicates the framework to which the model belonged prior to conversion.')
+@click.option('--api-rate-limit', type=click.IntRange(min=1), default=2500, show_default=True, help='Total authenticated Hub API requests allowed per 5 minutes across all machines.')
+@click.option('--resolver-rate-limit', type=click.IntRange(min=1), default=12000, show_default=True, help='Total authenticated Resolver requests allowed per 5 minutes across all machines.')
+@click.option('--machine-count', type=click.IntRange(min=1), default=5, show_default=True, help='Number of machines sharing the account quotas. Use the same settings on every machine.')
+@click.option('--rate-limit-utilization', type=click.FloatRange(min=0, max=1, min_open=True), default=0.8, show_default=True, help='Fraction of the quotas to use; 0.8 reserves 20 percent headroom.')
 @click.option('--library-name',         required=False, type=click.Choice(['transformers', 'diffusers', 'timm', 'sentence_transformers'], case_sensitive=True), default=None, help='Only convert models belonging to this library. Required with --framework optimum; unavailable with other frameworks.')
 @click.option('--model-size-limit-l',   required=False, type=click.FloatRange(min=0), default=None, help='Inclusive lower model size limit in GB (1024^3 bytes); accepts decimals, e.g. 0.5 or 3.')
 @click.option('--model-size-limit-r',   required=False, type=click.FloatRange(min=0), default=None, help='Inclusive upper model size limit in GB (1024^3 bytes); accepts decimals, e.g. 0.5 or 3.')
@@ -158,8 +162,10 @@ def create_onnx_convert_huggingface(
     model_infos_filepath,
     save_dirpath, cache_dirpath,
     device, framework, library_name, model_size_limit_l, model_size_limit_r, token, estimate, verbose,
-    logging_filepath
+    logging_filepath, api_rate_limit, resolver_rate_limit, machine_count, rate_limit_utilization
 ):
+    if not math.isfinite(rate_limit_utilization):
+        raise click.BadParameter('Must be finite.', param_hint='--rate-limit-utilization')
     equip_logger(logging_filepath=logging_filepath)
 
     if framework == 'optimum' and library_name is None:
@@ -177,7 +183,7 @@ def create_onnx_convert_huggingface(
 
     from younger_logics_ir.scripts.hubs.huggingface import convert
 
-    convert.main(model_infos_filepath, save_dirpath, cache_dirpath, device=device, framework=framework, library_name=library_name, model_size_limit_l=model_size_limit_l, model_size_limit_r=model_size_limit_r, token=token, estimate=estimate, verbose=verbose)
+    convert.main(model_infos_filepath, save_dirpath, cache_dirpath, device=device, framework=framework, library_name=library_name, model_size_limit_l=model_size_limit_l, model_size_limit_r=model_size_limit_r, token=token, estimate=estimate, verbose=verbose, api_rate_limit=api_rate_limit, resolver_rate_limit=resolver_rate_limit, machine_count=machine_count, rate_limit_utilization=rate_limit_utilization)
 
 
 @create_onnx_convert.command(name='onnx')

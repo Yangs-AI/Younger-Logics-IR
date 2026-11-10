@@ -38,6 +38,8 @@ from younger_logics_ir.commons.constants import YLIROriginHub
 
 from younger_logics_ir.scripts.commons.utils import get_onnx_opset_versions, get_onnx_model_opset_version
 
+from .http import RateLimitConfig, configure_hub_http, export_process
+
 from .utils import get_model_library_name, get_huggingface_hub_model_readme, get_huggingface_hub_model_siblings, clean_huggingface_hub_model_cache, infer_supported_frameworks, is_permanent_error, get_minimum_opset_from_error, get_huggingface_hub_model_storage
 
 
@@ -198,7 +200,7 @@ def convert_optimum(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_di
         onnx_opset_version = opset_versions[opset_index]
         delete_dir(cvt_cache_dirpath, only_clean=True)
         results_queue = multiprocessing.Queue()
-        subprocess = multiprocessing.Process(target=safe_optimum_export, args=(model_id, cvt_cache_dirpath, ofc_cache_dirpath, onnx_opset_version, results_queue, device, library_name, verbose))
+        subprocess = export_process(target=safe_optimum_export, args=(model_id, cvt_cache_dirpath, ofc_cache_dirpath, onnx_opset_version, results_queue, device, library_name, verbose))
         subprocess.start()
         subprocess.join()
 
@@ -398,7 +400,7 @@ def convert_sb3(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpat
         onnx_model_path = cvt_cache_dirpath.joinpath(f'{hash_string(str(sb3_model_path))}.onnx')
         for onnx_opset_version in opset_versions:
             results_queue = multiprocessing.Queue()
-            subprocess = multiprocessing.Process(target=safe_sb3_export, args=(model_id, sb3_model_path, onnx_model_path, onnx_opset_version, results_queue, verbose))
+            subprocess = export_process(target=safe_sb3_export, args=(model_id, sb3_model_path, onnx_model_path, onnx_opset_version, results_queue, verbose))
             subprocess.start()
             subprocess.join()
 
@@ -473,7 +475,7 @@ def convert_keras(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirp
             if onnx_opset_version < 14 or 18 < onnx_opset_version:
                 continue
             results_queue = multiprocessing.Queue()
-            subprocess = multiprocessing.Process(target=safe_keras_export, args=(keras_model_path, onnx_model_path, onnx_opset_version, results_queue, verbose))
+            subprocess = export_process(target=safe_keras_export, args=(keras_model_path, onnx_model_path, onnx_opset_version, results_queue, verbose))
             subprocess.start()
             subprocess.join()
 
@@ -530,7 +532,7 @@ def convert_tflite(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dir
             if onnx_opset_version < 14 or 18 < onnx_opset_version:
                 continue
             results_queue = multiprocessing.Queue()
-            subprocess = multiprocessing.Process(target=safe_tflite_export, args=(tflite_model_path, onnx_model_path, onnx_opset_version, results_queue, verbose))
+            subprocess = export_process(target=safe_tflite_export, args=(tflite_model_path, onnx_model_path, onnx_opset_version, results_queue, verbose))
             subprocess.start()
             subprocess.join()
             if results_queue.empty():
@@ -610,7 +612,7 @@ def convert_onnx(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpa
             else:
                 other_version_onnx_model_path = cvt_cache_dirpath.joinpath(f'{hash_string(str(onnx_model_path))}.onnx')
                 results_queue = multiprocessing.Queue()
-                subprocess = multiprocessing.Process(target=safe_onnx_export, args=(onnx_model_path, other_version_onnx_model_path, onnx_opset_version, results_queue, verbose))
+                subprocess = export_process(target=safe_onnx_export, args=(onnx_model_path, other_version_onnx_model_path, onnx_opset_version, results_queue, verbose))
                 subprocess.start()
                 subprocess.join()
                 if results_queue.empty():
@@ -704,6 +706,10 @@ def main(
     estimate: bool = False,
     library_name: Literal['transformers', 'diffusers', 'timm', 'sentence_transformers'] | None = None,
     verbose: bool = False,
+    api_rate_limit: int = 2500,
+    resolver_rate_limit: int = 12000,
+    machine_count: int = 5,
+    rate_limit_utilization: float = 0.8,
 ):
     """
     Retrieve Metadata of HuggingFace Models and Save Them Into Files.
@@ -720,6 +726,10 @@ def main(
     :type framework: Literal[&#39;optimum&#39;, &#39;onnx&#39;, &#39;keras&#39;, &#39;tflite&#39;], optional
     :param verbose: Show backend output and full exception tracebacks for all conversion frameworks.
     :param library_name: Required for optimum; only convert models belonging to this library.
+    :param api_rate_limit: Account-wide authenticated API request quota per five minutes.
+    :param resolver_rate_limit: Account-wide authenticated Resolver quota per five minutes.
+    :param machine_count: Machines sharing the account quotas; use identical settings on each.
+    :param rate_limit_utilization: Fraction of each quota to use, in (0, 1].
     :param model_size_limit_l: Inclusive lower size limit in bytes, defaults to None
     :type model_size_limit_l: int | None, optional
     :param model_size_limit_r: Inclusive upper size limit in bytes, defaults to None
@@ -741,6 +751,8 @@ def main(
         The model README is saved under Instances/{owner}/{model}/README.md.
 
     """
+
+    rate_config = RateLimitConfig(api_rate_limit, resolver_rate_limit, machine_count, rate_limit_utilization)
 
     if framework == 'optimum' and library_name is None:
         raise ValueError('library_name is required when framework is optimum.')
@@ -781,6 +793,11 @@ def main(
     convert_status, last_handled_model_id = get_convert_status_and_last_handled_model_id(sts_cache_dirpath, framework, model_size_limit, library_name=library_name)
     number_of_converted_models = len(convert_status)
     logger.info(f'-> Previous Converted Models: {number_of_converted_models}')
+
+    configure_hub_http(config=rate_config)
+    budgets = rate_config.budgets()
+    logger.info(f'-> Hub request pacing: {machine_count} machines, utilization {rate_limit_utilization:.0%}; '
+                f'per machine API {budgets["api"]:g}/5min, Resolver {budgets["resolvers"]:g}/5min.')
 
     if token is not None:
         logger.info(f'-> HuggingFace Token Provided. Now Logging In ...')
