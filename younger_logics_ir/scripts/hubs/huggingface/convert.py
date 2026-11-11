@@ -198,6 +198,7 @@ def convert_optimum(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_di
     opset_index = 0
     while opset_index < len(opset_versions):
         onnx_opset_version = opset_versions[opset_index]
+        logger.info(f'[{model_id}] [opset {onnx_opset_version}] Starting Optimum export; library: {library_name}; device: {device}')
         delete_dir(cvt_cache_dirpath, only_clean=True)
         results_queue = multiprocessing.Queue()
         subprocess = export_process(target=safe_optimum_export, args=(model_id, cvt_cache_dirpath, ofc_cache_dirpath, onnx_opset_version, results_queue, device, library_name, verbose))
@@ -211,8 +212,10 @@ def convert_optimum(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_di
         else:
             this_status, this_error = results_queue.get()
             if this_status == 'success':
+                logger.info(f'[{model_id}] [opset {onnx_opset_version}] Optimum export completed; converting ONNX artifacts to IR')
                 for filepath in cvt_cache_dirpath.rglob('*.onnx'):
                     artifact = filepath.relative_to(cvt_cache_dirpath).as_posix()
+                    logger.info(f'[{model_id}] [opset {onnx_opset_version}] Converting ONNX to IR: {artifact}')
                     try:
                         instance = Instance()
                         instance.setup_logicx(convert(load_model(filepath)))
@@ -225,7 +228,7 @@ def convert_optimum(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_di
 
         if this_status == 'access_deny':
             # jump out of the opset loop if Repository can not found
-            logger.warning(f'[opset {onnx_opset_version}] {this_status}: {this_error}')
+            logger.warning(f'[{model_id}] [opset {onnx_opset_version}] {this_status}: {this_error}')
             status[onnx_opset_version] = (this_status, this_status_details)
             # A 404 is a repository-level error rather than an opset-specific failure.
             # Stop here, so `status` may not contain entries for subsequent opsets.
@@ -235,14 +238,14 @@ def convert_optimum(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_di
         if this_status == 'convert_error':
             # Permanent error -> skip remaining opsets entirely
             if is_permanent_error(this_error):
-                logger.warning(f'[opset {onnx_opset_version}] {this_status}: {this_error}')
+                logger.warning(f'[{model_id}] [opset {onnx_opset_version}] {this_status}: {this_error}')
                 status[onnx_opset_version] = (this_status, this_status_details)
                 break
 
             # Unsupported operator with known minimum version -> jump there
             target_opset = get_minimum_opset_from_error(this_error)
             if target_opset is not None and target_opset > onnx_opset_version:
-                logger.warning(f'[opset {onnx_opset_version}] {this_status}: {this_error}')
+                logger.warning(f'[{model_id}] [opset {onnx_opset_version}] {this_status}: {this_error}')
                 status[onnx_opset_version] = (this_status, this_status_details)
                 # Find the opset >= target
                 for i in range(opset_index + 1, len(opset_versions)):
@@ -256,9 +259,9 @@ def convert_optimum(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_di
 
         # Log and record status
         if this_status == 'success':
-            logger.info(f'[opset {onnx_opset_version}] {this_status}: {len(this_status_details)} artifacts created')
+            logger.info(f'[{model_id}] [opset {onnx_opset_version}] {this_status}: {len(this_status_details)} artifacts created')
         elif this_error:
-            logger.warning(f'[opset {onnx_opset_version}] {this_status}: {this_error}')
+            logger.warning(f'[{model_id}] [opset {onnx_opset_version}] {this_status}: {this_error}')
         status[onnx_opset_version] = (this_status, this_status_details)
         opset_index += 1
 
@@ -379,6 +382,7 @@ def convert_sb3(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpat
     instances: list[Instance] = list()
     artifacts: list[tuple[str, int]] = list()
 
+    logger.info(f'[{model_id}] Listing sb3 model files')
     remote_sb3_model_paths = get_huggingface_hub_model_siblings(model_id, suffixes=['.zip'])
     # The lowest opset version support for stable-baselines3 models is 14
     # torch.onnx.export & optimum.onnx.main_export decide the highest supported opset version.
@@ -390,6 +394,7 @@ def convert_sb3(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpat
     for remote_sb3_model_path in remote_sb3_model_paths:
 
         try:
+            logger.info(f'[{model_id}] Downloading sb3 artifact: {remote_sb3_model_path}')
             sb3_model_path = pathlib.Path(hf_hub_download(model_id, remote_sb3_model_path, cache_dir=ofc_cache_dirpath))
         except Exception as exception:
             logger.error(f'Fail in convert_sb3: {model_id}; {type(exception).__name__}: {exception}', exc_info=verbose)
@@ -399,6 +404,7 @@ def convert_sb3(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpat
         status[remote_sb3_model_path] = dict()
         onnx_model_path = cvt_cache_dirpath.joinpath(f'{hash_string(str(sb3_model_path))}.onnx')
         for onnx_opset_version in opset_versions:
+            logger.info(f'[{model_id}] [opset {onnx_opset_version}] Starting sb3 export: {remote_sb3_model_path}')
             results_queue = multiprocessing.Queue()
             subprocess = export_process(target=safe_sb3_export, args=(model_id, sb3_model_path, onnx_model_path, onnx_opset_version, results_queue, verbose))
             subprocess.start()
@@ -410,6 +416,7 @@ def convert_sb3(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpat
                 this_status = results_queue.get()
                 if this_status == 'success':
                     try:
+                        logger.info(f'[{model_id}] [opset {onnx_opset_version}] Converting ONNX to IR: {remote_sb3_model_path}')
                         instance = Instance()
                         instance.setup_logicx(convert(load_model(pathlib.Path(onnx_model_path))))
                         instances.append(instance)
@@ -418,6 +425,8 @@ def convert_sb3(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpat
                         logger.error(f'Fail in convert_sb3: {model_id}; {type(exception).__name__}: {exception}', exc_info=verbose)
                         this_status = 'logicx_error'
 
+            log_status = logger.info if this_status == 'success' else logger.warning
+            log_status(f'[{model_id}] [opset {onnx_opset_version}] {remote_sb3_model_path}: {this_status}')
             status[remote_sb3_model_path][onnx_opset_version] = this_status
 
     clean_cache(model_id, cvt_cache_dirpath, ofc_cache_dirpath)
@@ -448,6 +457,7 @@ def convert_keras(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirp
     instances: list[Instance] = list()
     artifacts: list[tuple[str, int]] = list()
     remote_keras_model_paths = list()
+    logger.info(f'[{model_id}] Listing keras model files')
     for remote_keras_model_path in get_huggingface_hub_model_siblings(model_id, suffixes=['.keras', '.hdf5', '.h5', '.pbtxt', '.pb']):
         if remote_keras_model_path.endswith('.pbtxt') or remote_keras_model_path.endswith('.pb'):
             remote_keras_model_paths.append((os.path.dirname(remote_keras_model_path), 'D'))
@@ -457,6 +467,7 @@ def convert_keras(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirp
 
     for remote_keras_model_path, path_type in remote_keras_model_paths:
         artifact = remote_keras_model_path or '.'
+        logger.info(f'[{model_id}] Downloading keras artifact: {artifact}')
         try:
             if path_type == 'D':
                 allowed_pattern = '*' if remote_keras_model_path == '' else f'{remote_keras_model_path}/*'
@@ -474,6 +485,7 @@ def convert_keras(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirp
             # tf2onnx only support 14 - 18 opset version
             if onnx_opset_version < 14 or 18 < onnx_opset_version:
                 continue
+            logger.info(f'[{model_id}] [opset {onnx_opset_version}] Starting keras export: {artifact}')
             results_queue = multiprocessing.Queue()
             subprocess = export_process(target=safe_keras_export, args=(keras_model_path, onnx_model_path, onnx_opset_version, results_queue, verbose))
             subprocess.start()
@@ -485,6 +497,7 @@ def convert_keras(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirp
                 this_status = results_queue.get()
                 if this_status == 'success':
                     try:
+                        logger.info(f'[{model_id}] [opset {onnx_opset_version}] Converting ONNX to IR: {artifact}')
                         instance = Instance()
                         instance.setup_logicx(convert(load_model(onnx_model_path)))
                         instances.append(instance)
@@ -492,6 +505,8 @@ def convert_keras(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirp
                     except Exception as exception:
                         logger.error(f'Fail in convert_keras: {model_id}; {type(exception).__name__}: {exception}', exc_info=verbose)
                         this_status = 'logicx_error'
+            log_status = logger.info if this_status == 'success' else logger.warning
+            log_status(f'[{model_id}] [opset {onnx_opset_version}] {artifact}: {this_status}')
             status[artifact][onnx_opset_version] = this_status
 
     clean_cache(model_id, cvt_cache_dirpath, ofc_cache_dirpath)
@@ -516,8 +531,10 @@ def convert_tflite(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dir
     status: dict[str, Literal['access_deny'] | dict[int, Literal['success', 'convert_error', 'system_kill', 'logicx_error']]] = dict()
     instances: list[Instance] = list()
     artifacts: list[tuple[str, int]] = list()
+    logger.info(f'[{model_id}] Listing tflite model files')
     remote_tflite_model_paths = get_huggingface_hub_model_siblings(model_id, suffixes=['.tflite'])
     for remote_tflite_model_path in remote_tflite_model_paths:
+        logger.info(f'[{model_id}] Downloading tflite artifact: {remote_tflite_model_path}')
         try:
             tflite_model_path = pathlib.Path(hf_hub_download(model_id, remote_tflite_model_path, cache_dir=ofc_cache_dirpath))
         except Exception as exception:
@@ -531,6 +548,7 @@ def convert_tflite(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dir
             # tf2onnx only support 14 - 18 opset version
             if onnx_opset_version < 14 or 18 < onnx_opset_version:
                 continue
+            logger.info(f'[{model_id}] [opset {onnx_opset_version}] Starting tflite export: {remote_tflite_model_path}')
             results_queue = multiprocessing.Queue()
             subprocess = export_process(target=safe_tflite_export, args=(tflite_model_path, onnx_model_path, onnx_opset_version, results_queue, verbose))
             subprocess.start()
@@ -541,6 +559,7 @@ def convert_tflite(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dir
                 this_status = results_queue.get()
                 if this_status == 'success':
                     try:
+                        logger.info(f'[{model_id}] [opset {onnx_opset_version}] Converting ONNX to IR: {remote_tflite_model_path}')
                         instance = Instance()
                         instance.setup_logicx(convert(load_model(onnx_model_path)))
                         instances.append(instance)
@@ -549,6 +568,8 @@ def convert_tflite(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dir
                         logger.error(f'Fail in convert_tflite: {model_id}; {type(exception).__name__}: {exception}', exc_info=verbose)
                         this_status = 'logicx_error'
 
+            log_status = logger.info if this_status == 'success' else logger.warning
+            log_status(f'[{model_id}] [opset {onnx_opset_version}] {remote_tflite_model_path}: {this_status}')
             status[remote_tflite_model_path][onnx_opset_version] = this_status
 
     clean_cache(model_id, cvt_cache_dirpath, ofc_cache_dirpath)
@@ -573,8 +594,10 @@ def convert_onnx(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpa
     status: dict[str, dict[int, str] | Literal['system_kill']] = dict()
     instances: list[Instance] = list()
     artifacts: list[tuple[str, int]] = list()
+    logger.info(f'[{model_id}] Listing onnx model files')
     remote_onnx_model_paths = get_huggingface_hub_model_siblings(model_id, suffixes=['.onnx'])
     for remote_onnx_model_path in remote_onnx_model_paths:
+        logger.info(f'[{model_id}] Downloading onnx artifact: {remote_onnx_model_path}')
         try:
             onnx_model_path = pathlib.Path(hf_hub_download(model_id, remote_onnx_model_path, cache_dir=ofc_cache_dirpath))
         except Exception as exception:
@@ -585,6 +608,7 @@ def convert_onnx(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpa
         status[remote_onnx_model_path] = dict()
 
         try:
+            logger.info(f'[{model_id}] Loading ONNX artifact: {remote_onnx_model_path}')
             onnx_model = load_model(onnx_model_path)
         except Exception as exception:
             logger.error(f'Fail in convert_onnx: {model_id}; {type(exception).__name__}: {exception}', exc_info=verbose)
@@ -592,6 +616,7 @@ def convert_onnx(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpa
             continue
 
         try:
+            logger.info(f'[{model_id}] Reading ONNX opset: {remote_onnx_model_path}')
             onnx_model_opset_version = get_onnx_model_opset_version(onnx_model)
         except Exception as exception:
             logger.error(f'Fail in convert_onnx: {model_id}; {type(exception).__name__}: {exception}', exc_info=verbose)
@@ -602,6 +627,7 @@ def convert_onnx(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpa
             if onnx_opset_version == onnx_model_opset_version:
                 this_status = 'success'
                 try:
+                    logger.info(f'[{model_id}] [opset {onnx_opset_version}] Converting ONNX to IR: {remote_onnx_model_path}')
                     instance = Instance()
                     instance.setup_logicx(convert(onnx_model))
                     instances.append(instance)
@@ -611,6 +637,7 @@ def convert_onnx(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpa
                     this_status = 'logicx_error'
             else:
                 other_version_onnx_model_path = cvt_cache_dirpath.joinpath(f'{hash_string(str(onnx_model_path))}.onnx')
+                logger.info(f'[{model_id}] [opset {onnx_opset_version}] Converting ONNX opset: {remote_onnx_model_path}')
                 results_queue = multiprocessing.Queue()
                 subprocess = export_process(target=safe_onnx_export, args=(onnx_model_path, other_version_onnx_model_path, onnx_opset_version, results_queue, verbose))
                 subprocess.start()
@@ -621,6 +648,7 @@ def convert_onnx(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpa
                     this_status = results_queue.get()
                     if this_status == 'success':
                         try:
+                            logger.info(f'[{model_id}] [opset {onnx_opset_version}] Converting ONNX to IR: {remote_onnx_model_path}')
                             instance = Instance()
                             instance.setup_logicx(convert(load_model(other_version_onnx_model_path)))
                             instances.append(instance)
@@ -628,6 +656,8 @@ def convert_onnx(model_id: str, cvt_cache_dirpath: pathlib.Path, ofc_cache_dirpa
                         except Exception as exception:
                             logger.error(f'Fail in convert_onnx: {model_id}; {type(exception).__name__}: {exception}', exc_info=verbose)
                             this_status = 'logicx_error'
+            log_status = logger.info if this_status == 'success' else logger.warning
+            log_status(f'[{model_id}] [opset {onnx_opset_version}] {remote_onnx_model_path}: {this_status}')
             status[remote_onnx_model_path][onnx_opset_version] = this_status
 
     clean_cache(model_id, cvt_cache_dirpath, ofc_cache_dirpath)
@@ -809,6 +839,8 @@ def main(
     with tqdm.tqdm(total=len(model_infos), desc='Create Instances') as progress_bar:
         for convert_index, model_info in enumerate(model_infos, start=1):
             model_id = model_info['id']
+            progress_bar.set_description(f'Checking - {model_id}')
+            logger.info(f'[{convert_index}/{len(model_infos)}] Checking model storage: {model_id}')
             possible_model_size = get_huggingface_hub_model_storage(model_id, token=token)
             if model_size_limit_l <= possible_model_size and possible_model_size <= model_size_limit_r:
                 model_library_name = get_model_library_name(model_info) if framework == 'optimum' else None
@@ -819,7 +851,10 @@ def main(
                     progress_bar.update(1)
                     continue
 
+                progress_bar.set_description(f'Converting - {model_id}')
+                logger.info(f'[{convert_index}/{len(model_infos)}] Starting conversion: {model_id}; framework: {framework}; library: {model_library_name}; device: {device}')
                 status, instances, artifacts = convert_method(model_id, cvt_cache_dirpath, ofc_cache_dirpath, device, library_name=model_library_name, verbose=verbose)
+                logger.info(f'[{model_id}] Conversion returned {len(instances)} instances; saving results')
 
                 model_owner, model_name = model_id.split('/')
                 model_dirpath = instances_dirpath.joinpath(model_owner, model_name)
@@ -866,7 +901,8 @@ def main(
             set_convert_status_last_handled_model_id(sts_cache_dirpath, framework, model_size_limit, status, model_id, library_name=library_name)
             clean_cache(model_id, cvt_cache_dirpath, ofc_cache_dirpath)
 
-            progress_bar.set_description(f'Convert - {model_id}')
+            progress_bar.set_description(f'Handled - {model_id}')
+            logger.info(f'[{convert_index}/{len(model_infos)}] Finished handling model: {model_id}')
             progress_bar.update(1)
 
     logger.info(f'-> Instances Created.')
