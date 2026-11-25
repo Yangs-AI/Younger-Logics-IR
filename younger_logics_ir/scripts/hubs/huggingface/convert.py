@@ -6,7 +6,7 @@
 # Author: Jason Young (杨郑鑫).
 # E-Mail: AI.Jason.Young@outlook.com
 # Last Modified by: Jason Young (杨郑鑫)
-# Last Modified time: 2026-11-04 20:29:01
+# Last Modified time: 2026-11-25 16:01:37
 # Copyright (c) 2024 Yangs.AI
 #
 # This source code is licensed under the Apache License 2.0 found in the
@@ -805,6 +805,30 @@ def main(
         logger.info(f'Only Estimate. Models To Be Converted: {len(model_infos)}; Model Infos Filename: {model_infos_filepath.name}.')
         return
 
+    sts_cache_dirpath = cache_dirpath.joinpath('Cache-HFSts')
+    convert_status, last_handled_model_id = get_convert_status_and_last_handled_model_id(sts_cache_dirpath, framework, model_size_limit, library_name=library_name)
+    last_recorded_model_id = convert_status[-1][0] if convert_status else None
+    if last_handled_model_id != last_recorded_model_id:
+        raise ValueError(
+            f'Cannot resume {model_infos_filepath}: checkpoint {last_handled_model_id!r} does not match '
+            f'the last status record {last_recorded_model_id!r}. Check the .sts files in {sts_cache_dirpath}.'
+        )
+    number_of_handled_models = len(convert_status)
+    if number_of_handled_models > len(model_infos):
+        raise ValueError(
+            f'Cannot resume {model_infos_filepath}: found {len(model_infos)} models after filtering, '
+            f'but {sts_cache_dirpath} records {number_of_handled_models} through {last_handled_model_id!r}.'
+        )
+    for position, ((recorded_model_id, _), model_info) in enumerate(zip(convert_status, model_infos), start=1):
+        model_id = model_info['id']
+        if recorded_model_id != model_id:
+            raise ValueError(
+                f'Cannot resume {model_infos_filepath}: model ID mismatch at position {position} '
+                f'after filtering (status: {recorded_model_id!r}, JSON: {model_id!r}). '
+                f'Check that the JSON matches the conversion cache at {sts_cache_dirpath}.'
+            )
+    logger.info(f'-> Previously handled models: {number_of_handled_models}')
+
     # Instances
     instances_dirpath = save_dirpath.joinpath(f'Instances')
     create_dir(instances_dirpath)
@@ -817,12 +841,7 @@ def main(
     cvt_cache_dirpath = cache_dirpath.joinpath(f'Cache-HFCvt')
     create_dir(cvt_cache_dirpath)
 
-    # Status
-    sts_cache_dirpath = cache_dirpath.joinpath(f'Cache-HFSts')
     create_dir(sts_cache_dirpath)
-    convert_status, last_handled_model_id = get_convert_status_and_last_handled_model_id(sts_cache_dirpath, framework, model_size_limit, library_name=library_name)
-    number_of_converted_models = len(convert_status)
-    logger.info(f'-> Previous Converted Models: {number_of_converted_models}')
 
     configure_hub_http(config=rate_config)
     budgets = rate_config.budgets()
@@ -839,18 +858,16 @@ def main(
     with tqdm.tqdm(total=len(model_infos), desc='Create Instances') as progress_bar:
         for convert_index, model_info in enumerate(model_infos, start=1):
             model_id = model_info['id']
+            if convert_index <= number_of_handled_models:
+                progress_bar.set_description(f'Previously Handled, Skip - {model_id}')
+                progress_bar.update(1)
+                continue
+
             progress_bar.set_description(f'Checking - {model_id}')
             logger.info(f'[{convert_index}/{len(model_infos)}] Checking model storage: {model_id}')
             possible_model_size = get_huggingface_hub_model_storage(model_id, token=token)
             if model_size_limit_l <= possible_model_size and possible_model_size <= model_size_limit_r:
                 model_library_name = get_model_library_name(model_info) if framework == 'optimum' else None
-                if last_handled_model_id is not None:
-                    if model_id == last_handled_model_id:
-                        last_handled_model_id = None
-                    progress_bar.set_description(f'Converted, Skip - {model_id}')
-                    progress_bar.update(1)
-                    continue
-
                 progress_bar.set_description(f'Converting - {model_id}')
                 logger.info(f'[{convert_index}/{len(model_infos)}] Starting conversion: {model_id}; framework: {framework}; library: {model_library_name}; device: {device}')
                 status, instances, artifacts = convert_method(model_id, cvt_cache_dirpath, ofc_cache_dirpath, device, library_name=model_library_name, verbose=verbose)
